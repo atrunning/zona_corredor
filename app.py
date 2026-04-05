@@ -8,7 +8,7 @@ from routes.organizador import organizador_bp
 from routes.eventos import eventos_bp
 from flask import session, redirect
 import re
-
+from db import get_db_connection
 def slugify(texto):
     texto = texto.lower()
     texto = re.sub(r'[^a-z0-9\s-]', '', texto)
@@ -1778,6 +1778,18 @@ def toggle_publicado(evento_id):
     window.location.href="/evento/{evento_id}/panel"
     </script>
     """
+@app.route("/test-db")
+def test_db():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SHOW TABLES;")
+    tablas = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+
+    return str(tablas)
 
 if __name__ == "__main__":
     app.run(debug=True)
