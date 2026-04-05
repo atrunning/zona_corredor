@@ -1,15 +1,22 @@
 import mysql.connector
 
+import os
+import mysql.connector
+
+import mysql.connector
+import os
+
 def get_db_connection():
     return mysql.connector.connect(
-        host="junction.proxy.rlwy.net",
-        port=39867,
-        user="root",
-        password="38801233",
-        database="railway"
+        host=os.getenv("MYSQLHOST"),
+        user=os.getenv("MYSQLUSER"),
+        password=os.getenv("MYSQLPASSWORD"),
+        database=os.getenv("MYSQLDATABASE"),
+        port=int(os.getenv("MYSQLPORT"))
     )
 
 if __name__ == "__main__":
     conn = get_db_connection()
     print("CONECTADO 🚀")
     conn.close()
+    
