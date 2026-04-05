@@ -1,9 +1,4 @@
 import mysql.connector
-
-import os
-import mysql.connector
-
-import mysql.connector
 import os
 
 def get_db_connection():
