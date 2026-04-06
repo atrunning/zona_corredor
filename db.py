@@ -7,7 +7,7 @@ def get_db_connection():
         user=os.getenv("MYSQLUSER"),
         password=os.getenv("MYSQLPASSWORD"),
         database=os.getenv("MYSQLDATABASE"),
-        port=int(os.getenv("MYSQLPORT"))
+        port = int(os.getenv("MYSQLPORT") or 3306))
     )
 
 if __name__ == "__main__":
