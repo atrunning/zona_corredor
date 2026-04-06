@@ -746,23 +746,7 @@ def ver_evento(evento_id):
     """
     return layout(salida, menu=False)
 
-@app.route("/eventos")
-def listar_eventos():
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
 
-    cursor.execute("SELECT id, nombre, fecha, lugar FROM eventos")
-    eventos = cursor.fetchall()
-
-    cursor.close()
-    conn.close()
-
-    salida = "<h1>Eventos disponibles</h1>"
-
-    for e in eventos:
-        salida += f"<p>{e['id']} - {e['nombre']} - {e['fecha']} - {e['lugar']}</p>"
-
-    return salida
 
 @app.route("/evento/<int:evento_id>/reporte_remeras")
 def reporte_remeras(evento_id):
