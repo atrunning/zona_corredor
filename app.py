@@ -621,40 +621,44 @@ def ver_evento(evento_id):
     <h3>Elegí distancia</h3>
     """
 
+    # calcular inscriptos y disponibles
+    cursor.execute("""
+        SELECT distancia_id, COUNT(*) as inscriptos
+        FROM inscripciones
+        WHERE evento_id = %s
+        GROUP BY distancia_id
+    """, (evento_id,))
+
+    conteo = {row["distancia_id"]: row["inscriptos"] for row in cursor.fetchall()}
+
+    
     for d in distancias:
 
-            hoy = date.today()
+        hoy = date.today()
 
-            precio = "Gratis" if d["es_gratis"] else f"${int(d['precio']):,}".replace(",", ".")
-            remera = "👕 incluye remera" if d["incluye_remera"] else ""
+        precio = "Gratis" if d["es_gratis"] else f"${int(d['precio']):,}".replace(",", ".")
+        remera = "👕 incluye remera" if d["incluye_remera"] else ""
 
-            inicio = d["fecha_inicio_inscripcion"]
-            fin = d["fecha_fin_inscripcion"]
+        inicio = d["fecha_inicio_inscripcion"]
+        fin = d["fecha_fin_inscripcion"]
 
-            inscripcion_abierta = True
+        inscripcion_abierta = True
 
-            if inicio and hoy < inicio:
-                inscripcion_abierta = False
+        if inicio and hoy < inicio:
+            inscripcion_abierta = False
 
-            if fin and hoy > fin:
-                inscripcion_abierta = False
+        if fin and hoy > fin:
+            inscripcion_abierta = False
 
+        # 🔥 ESTO FALTABA
+        inscriptos = conteo.get(d["id"], 0)
+        disponibles = max(d["cupo"] - inscriptos, 0)
 
-            # calcular inscriptos y disponibles
-            cursor2 = conn.cursor(dictionary=True)
-            cursor2.execute("""
-                SELECT COUNT(*) as inscriptos
-                FROM inscripciones
-                WHERE distancia_id=%s AND evento_id=%s
-            """, (d["id"], evento_id))
-
-            data = cursor2.fetchone()
-            inscriptos = data["inscriptos"]
-            disponibles = max(d["cupo"] - inscriptos, 0)
-
-            cursor2.close()
+        if inscripcion_abierta and disponibles > 0:
+            boton = ...
 
 
+            
             if inscripcion_abierta and disponibles > 0:
 
                 boton = f"""

@@ -873,6 +873,7 @@ def administrar_distancias(evento_id):
         """
 
     salida += "</table>"
+    return layout(salida, evento_id=evento_id)
 
     
 
