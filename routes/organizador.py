@@ -88,7 +88,21 @@ def ver_inscriptos(evento_id):
     cursor.close()
     conn.close()
 
-    salida = "<h1>Inscriptos del evento</h1>"
+    salida = f"""
+    <a href="/evento/{evento_id}/panel" style="
+    display:inline-block;
+    margin-bottom:15px;
+    padding:8px 15px;
+    background:#1976d2;
+    color:white;
+    border-radius:6px;
+    text-decoration:none;
+    ">
+    ← Volver al panel
+    </a>
+
+    <h1>Inscriptos del evento</h1>
+    """
 
     # -------------------
     # RESUMEN
@@ -116,7 +130,7 @@ def ver_inscriptos(evento_id):
         '>
         <b>{d['nombre']}</b><br><br>
 
-        Total: {d['total']}<br>
+        Total: ${"{:,.0f}".format(d['total']).replace(",", ".")}<br>
         <span style='color:green'>Pagados: {d['pagados']}</span><br>
         <span style='color:orange'>Pendientes: {d['pendientes']}</span><br>
         <span style='color:red'>Vencidos: {d['vencidos']}</span>
@@ -1007,6 +1021,7 @@ def editar_inscripcion(numero):
         i.dorsal,
         i.distancia_id,
         i.talle_remera,
+        i.evento_id,           
 
         p.nombre,
         p.apellido,
@@ -1031,6 +1046,7 @@ def editar_inscripcion(numero):
     WHERE i.numero_inscripcion=%s
     """, (numero,))
     ins = cursor.fetchone()
+    evento_id = ins["evento_id"]
 
     
     inscripcion_id = ins["id"]
@@ -1156,6 +1172,18 @@ def editar_inscripcion(numero):
     <input type="hidden" name="tab" id="tab_actual" value="{tab}">
 
     <div id="resumen" style="display:none">
+
+    <a href="/evento/{evento_id}/inscriptos" style="
+    display:inline-block;
+    margin-bottom:15px;
+    padding:8px 15px;
+    background:#4caf50;
+    color:white;
+    border-radius:6px;
+    text-decoration:none;
+    ">
+    ← Volver a inscriptos
+    </a>
 
     <h2>Resumen</h2>
 
@@ -1608,10 +1636,13 @@ def editar_pago(pago_id):
 
 @organizador_bp.route("/evento/<int:evento_id>/editar", methods=["GET","POST"])
 def editar_evento(evento_id):
-
+    print(request.form)
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
+    # =========================
+    # POST (GUARDAR)
+    # =========================
     if request.method == "POST":
         nombre = request.form["nombre"]
         fecha = request.form["fecha"]
@@ -1626,26 +1657,38 @@ def editar_evento(evento_id):
 
         latitud = float(latitud) if latitud not in [None, "", "None"] else None
         longitud = float(longitud) if longitud not in [None, "", "None"] else None
-    archivo = request.files.get("imagen")
 
-    if archivo and archivo.filename != "":
-        nombre_archivo = secure_filename(archivo.filename)
+        archivo = request.files.get("imagen")
+        imagen = None
 
-        carpeta = "static/eventos"
+        if archivo and archivo.filename != "":
+            nombre_archivo = secure_filename(archivo.filename)
 
-        if not os.path.exists(carpeta):
-            os.makedirs(carpeta)
+            carpeta = "static/eventos"
+            if not os.path.exists(carpeta):
+                os.makedirs(carpeta)
 
-        ruta = os.path.join(carpeta, nombre_archivo)
+            ruta = os.path.join(carpeta, nombre_archivo)
+            archivo.save(ruta)
 
-        archivo.save(ruta)
-        cursor.execute("""
-        UPDATE eventos
-        SET nombre=%s,fecha=%s,hora=%s,lugar=%s,provincia=%s,
-            descripcion=%s,direccion=%s,latitud=%s,longitud=%s
-        WHERE id=%s
-        """,(nombre,fecha,hora,lugar,provincia,descripcion,
-             direccion,latitud,longitud,evento_id))
+            imagen = nombre_archivo
+
+        if imagen:
+            cursor.execute("""
+            UPDATE eventos
+            SET nombre=%s,fecha=%s,hora=%s,lugar=%s,provincia=%s,
+                descripcion=%s,direccion=%s,latitud=%s,longitud=%s,imagen=%s
+            WHERE id=%s
+            """,(nombre,fecha,hora,lugar,provincia,descripcion,
+                 direccion,latitud,longitud,imagen,evento_id))
+        else:
+            cursor.execute("""
+            UPDATE eventos
+            SET nombre=%s,fecha=%s,hora=%s,lugar=%s,provincia=%s,
+                descripcion=%s,direccion=%s,latitud=%s,longitud=%s
+            WHERE id=%s
+            """,(nombre,fecha,hora,lugar,provincia,descripcion,
+                 direccion,latitud,longitud,evento_id))
 
         conn.commit()
         cursor.close()
@@ -1658,137 +1701,145 @@ def editar_evento(evento_id):
         </script>
         """
 
+    # =========================
+    # GET
+    # =========================
     cursor.execute("SELECT * FROM eventos WHERE id=%s",(evento_id,))
     evento = cursor.fetchone()
+
+    hora = evento.get("hora")
+
+    if hora:
+        try:
+            hora = hora.strftime("%H:%M")
+        except:
+            hora = str(hora)[:5]
+    else:
+        hora = ""
 
     cursor.close()
     conn.close()
 
     salida = f"""
-<script src="https://cdn.ckeditor.com/ckeditor5/36.0.1/classic/ckeditor.js"></script>
+    <form method="POST" enctype="multipart/form-data">
 
-<h1>Editar evento</h1>
+    <h2>Editar evento</h2>
 
-<form method="POST" enctype="multipart/form-data">
+    Nombre del evento<br>
+    <input type="text" name="nombre" value="{evento.get('nombre','')}" style="width:400px"><br><br>
 
-Nombre<br>
-<input type="text" name="nombre" value="{evento['nombre']}" style="width:400px"><br><br>
+    Fecha<br>
+    <input type="date" name="fecha" value="{evento.get('fecha','')}"><br><br>
 
-Fecha<br>
-<input type="date" name="fecha" value="{evento['fecha']}"><br><br>
+    Hora<br>
+    <input type="time" name="hora" value="{hora}"><br><br>
 
-Hora<br>
-<input type="time" name="hora" value="{evento['hora']}"><br><br>
+    Lugar<br>
+    <input type="text" name="lugar" value="{evento.get('lugar','')}" style="width:400px"><br><br>
 
-Lugar<br>
-<input type="text" name="lugar" value="{evento['lugar']}" style="width:400px"><br><br>
+    Provincia<br>
+    <input type="text" name="provincia" value="{evento.get('provincia','')}" style="width:400px"><br><br>
 
-Provincia<br>
-<input type="text" name="provincia" value="{evento['provincia'] or ''}" style="width:400px"><br><br>
+    <h3>Descripción</h3>
+    <textarea id="editor" name="descripcion" style="width:100%;height:200px;">
+    {evento.get("descripcion","")}
+    </textarea><br><br>
 
-Descripción<br>
+    <h3>Ubicación del evento</h3>
 
-<textarea name="descripcion" id="editor">
-{evento['descripcion'] or ""}
-</textarea>
+    <input type="text" id="direccion" name="direccion"
+    value="{evento.get('direccion','')}"
+    style="width:400px"><br><br>
 
-<br><br>
+    <input type="hidden" id="latitud" name="latitud"
+    value="{evento.get('latitud','')}">
 
-<h3>Ubicación del evento</h3>
+    <input type="hidden" id="longitud" name="longitud"
+    value="{evento.get('longitud','')}">
 
-<input type="text" id="direccion" name="direccion"
-value="{evento.get('direccion','')}"
-style="width:400px"><br><br>
+    <div style="max-width:400px;margin-top:10px">
+        <div id="map" style="width:100%;height:180px;border-radius:10px"></div>
+    </div>
 
-<input type="hidden" id="latitud" name="latitud"
-value="{evento.get('latitud','')}">
+    <br><br>
 
-<input type="hidden" id="longitud" name="longitud"
-value="{evento.get('longitud','')}">
+    <h3>Imagen</h3>
 
-<div style="max-width:400px;margin-top:10px">
-    <div id="map" style="width:100%;height:180px;border-radius:10px"></div>
-</div>
+    <input type="file" name="imagen" accept="image/*" onchange="previewImagen(event)"><br><br>
 
-<br><br>
-<br>
-Imagen del evento<br>
-<input type="file" name="imagen" accept="image/*"><br><br>
+    <img id="preview" style="max-width:200px;border-radius:8px;display:none">
 
-<img src="/static/eventos/{evento.get('imagen') or 'logo.png'}"
-style="max-width:200px;border-radius:8px;"><br><br>
+    <img src="/static/eventos/{evento.get('imagen') or 'logo.png'}"
+    style="max-width:200px;border-radius:8px;"><br><br>
 
-<button type="submit">Guardar cambios</button>
+    <button type="submit" style="
+    padding:10px 20px;
+    background:#222;
+    color:white;
+    border:none;
+    border-radius:6px;
+    cursor:pointer;
+    ">
+    Guardar cambios
+    </button>
 
-</form>
-"""
-
-    # =========================
-    # 🔥 CKEDITOR (NO TOCAR)
-    # =========================
+    </form>
+    """
     salida += """
     <script>
+    function previewImagen(event){
+        const input = event.target;
+        const preview = document.getElementById("preview");
 
-    function resizeImage(file, maxWidth = 1000, quality = 0.7) {
-        return new Promise((resolve) => {
-
-            const img = new Image();
+        if(input.files && input.files[0]){
             const reader = new FileReader();
 
-            reader.onload = e => img.src = e.target.result;
+            reader.onload = function(e){
+                preview.src = e.target.result;
+                preview.style.display = "block";
+            }
 
-            img.onload = () => {
-                const canvas = document.createElement('canvas');
-
-                let width = img.width;
-                let height = img.height;
-
-                if (width > maxWidth) {
-                    height = height * (maxWidth / width);
-                    width = maxWidth;
-                }
-
-                canvas.width = width;
-                canvas.height = height;
-
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0, width, height);
-
-                canvas.toBlob(blob => {
-                    resolve(blob);
-                }, 'image/jpeg', quality);
-            };
-
-            reader.readAsDataURL(file);
-        });
+            reader.readAsDataURL(input.files[0]);
+        }
     }
+    </script>
+    """
+    # =========================
+    # CKEDITOR
+    # =========================
+    salida += """
+    <script src="https://cdn.ckeditor.com/ckeditor5/39.0.1/classic/ckeditor.js"></script>
 
-    function MyUploadAdapter(loader) {
-        this.loader = loader;
-    }
+    <script>
+    class MyUploadAdapter {
+        constructor(loader) {
+            this.loader = loader;
+        }
 
-    MyUploadAdapter.prototype.upload = function () {
-        return this.loader.file.then(file => {
+        upload() {
+            return this.loader.file.then(file => {
+                return new Promise((resolve, reject) => {
 
-            return new Promise((resolve, reject) => {
+                    const data = new FormData();
+                    data.append('upload', file);
 
-                const formData = new FormData();
-                formData.append('upload', file);
-
-                fetch('/subir_imagen', {
-                    method: 'POST',
-                    body: formData
-                })
-                .then(res => res.json())
-                .then(result => {
-                    resolve({ default: result.url });
-                })
-                .catch(err => reject(err));
-
+                    fetch('/subir_imagen', {
+                        method: 'POST',
+                        body: data
+                    })
+                    .then(response => response.json())
+                    .then(result => {
+                        resolve({
+                            default: result.url
+                        });
+                    })
+                    .catch(error => reject(error));
+                });
             });
+        }
 
-        });
-    };
+        abort() {}
+    }
 
     function MyCustomUploadAdapterPlugin(editor) {
         editor.plugins.get('FileRepository').createUploadAdapter = (loader) => {
@@ -1796,22 +1847,21 @@ style="max-width:200px;border-radius:8px;"><br><br>
         };
     }
 
-    ClassicEditor
-    .create(document.querySelector('#editor'), {
-        extraPlugins: [ MyCustomUploadAdapterPlugin ],
-    })
-    .catch(error => console.error(error));
+    let editor;
 
+    ClassicEditor
+        .create(document.querySelector('#editor'), {
+            extraPlugins: [ MyCustomUploadAdapterPlugin ],
+        })
+        .then(e => {
+            editor = e;
+        })
+        .catch(error => console.error(error));
     </script>
     """
 
-
-    salida += """
-    <div style="min-height:400px;">
-    """
-    
     # =========================
-    # 🗺️ MAPA (SEPARADO)
+    # MAPA
     # =========================
     salida += f"""
     <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAO2tAZ13XqjSbEPBk7CUqybYU3PBajFGk&libraries=places"></script>
@@ -1860,7 +1910,6 @@ style="max-width:200px;border-radius:8px;"><br><br>
 
     return layout(salida)
 
-
 # ---------------------------------------------------
 # SUBIR IMÁGENES DESDE EL EDITOR
 # ---------------------------------------------------
@@ -1880,7 +1929,11 @@ def subir_imagen():
 
     import time
 
-    nombre = str(int(time.time())) + "_" + secure_filename(archivo.filename)
+    import time
+    import uuid
+
+    extension = archivo.filename.rsplit(".", 1)[-1].lower()
+    nombre = f"{int(time.time())}_{uuid.uuid4().hex[:6]}.{extension}"
 
     carpeta = os.path.join("static", "mapas")
 

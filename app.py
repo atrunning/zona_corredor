@@ -8,7 +8,7 @@ from routes.organizador import organizador_bp
 from routes.eventos import eventos_bp
 from flask import session, redirect
 import re
-from db import get_db_connection
+
 def slugify(texto):
     texto = texto.lower()
     texto = re.sub(r'[^a-z0-9\s-]', '', texto)
@@ -746,7 +746,23 @@ def ver_evento(evento_id):
     """
     return layout(salida, menu=False)
 
+@app.route("/eventos")
+def listar_eventos():
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
 
+    cursor.execute("SELECT id, nombre, fecha, lugar FROM eventos")
+    eventos = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+
+    salida = "<h1>Eventos disponibles</h1>"
+
+    for e in eventos:
+        salida += f"<p>{e['id']} - {e['nombre']} - {e['fecha']} - {e['lugar']}</p>"
+
+    return salida
 
 @app.route("/evento/<int:evento_id>/reporte_remeras")
 def reporte_remeras(evento_id):
@@ -1390,8 +1406,7 @@ def panel_evento(evento_id):
     # -------------------
     cobrado = cobrado or 0
     salida += f"""
-   
-    <div style="display:flex; gap:20px; margin-bottom:20px;">
+    <div style="display:flex; gap:20px; margin-bottom:20px; flex-wrap:wrap;">
 
         <div style="background:#1976d2;color:white;padding:20px;border-radius:10px;width:200px;">
             <b>Total inscriptos</b>
@@ -1409,11 +1424,8 @@ def panel_evento(evento_id):
         </div>
 
         <div style="background:#616161;color:white;padding:20px;border-radius:10px;width:200px;">
-            <div style="background:#616161;color:white;padding:20px;border-radius:10px;width:200px;">
             <b>💰 Cobrado</b>
-            <h2>${cobrado:,.0f}</h2>
-        </div>
-            
+            <h2>${"{:,.0f}".format(cobrado).replace(",", ".")}</h2>
         </div>
 
     </div>
@@ -1762,18 +1774,6 @@ def toggle_publicado(evento_id):
     window.location.href="/evento/{evento_id}/panel"
     </script>
     """
-@app.route("/test-db")
-def test_db():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    cursor.execute("SHOW TABLES;")
-    tablas = cursor.fetchall()
-
-    cursor.close()
-    conn.close()
-
-    return str(tablas)
 
 if __name__ == "__main__":
     app.run(debug=True)
