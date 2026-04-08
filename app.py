@@ -944,71 +944,93 @@ def inscribirse(evento_id):
         cursor.close()
         conn.close()
 
-        salida = "<h2>Datos del corredor</h2>"
-        salida += "<form method='POST'>"
+        salida = f"""
+        <div style="max-width:600px;margin:40px auto;font-family:Arial">
 
-       
-        salida += f"<input type='hidden' name='distancia_id' value='{distancia_id}'>"
-        salida += f"<h3>Distancia: {distancia['nombre']}</h3>"
+        <h2 style="text-align:center;margin-bottom:10px">🏃 Datos del corredor</h2>
 
-        salida += "<h3>Identificación</h3>"
-        salida += f"DNI: <input type='text' name='dni' value='{dni}' pattern='[0-9]{{7,8}}' maxlength='8' required><br>"
+        <div style="text-align:center;color:#555;margin-bottom:25px">
+        Distancia: <b>{distancia['nombre']}</b>
+        </div>
 
-        salida += "<input type='hidden' name='accion' value='confirmar'>"
-        salida += f"<input type='hidden' name='persona_id' value='{persona['id']}'>"
-        salida += f"Nombre: <input type='text' name='nombre' value='{persona['nombre']}'><br>"
-        salida += f"Apellido: <input type='text' name='apellido' value='{persona['apellido']}'><br>"
-        salida += f"Email: <input type='email' name='email' value='{persona['email']}' style='width:300px' required><br>"
-        salida += "Confirmar email: <input type='email' name='email_confirmar' style='width:300px' required><br>"
-        salida += f"Celular: <input type='text' name='celular' value='{persona['celular']}'><br>"
+        <form method="POST" style="display:flex;flex-direction:column;gap:15px">
 
-        salida += f"Fecha nacimiento: <input type='date' name='fecha_nacimiento' value='{persona.get('fecha_nac','')}' required><br>"
-        salida += "Edad: <input type='number' name='edad' min='1' max='100'><br>"
+        <input type="hidden" name="distancia_id" value="{distancia_id}">
+        <input type="hidden" name="accion" value="confirmar">
+        <input type="hidden" name="persona_id" value="{persona['id']}">
+
+        <h3>Identificación</h3>
+
+        <input type="text" name="dni" value="{dni}" pattern="[0-9]{{7,8}}" maxlength="8" required
+        placeholder="DNI"
+        style="padding:10px;border:1px solid #ccc;border-radius:6px;">
+
+        <input type="text" name="nombre" value="{persona['nombre']}" placeholder="Nombre"
+        style="padding:10px;border:1px solid #ccc;border-radius:6px;">
+
+        <input type="text" name="apellido" value="{persona['apellido']}" placeholder="Apellido"
+        style="padding:10px;border:1px solid #ccc;border-radius:6px;">
+
+        <input type="email" name="email" value="{persona['email']}" placeholder="Email" required
+        style="padding:10px;border:1px solid #ccc;border-radius:6px;">
+
+        <input type="email" name="email_confirmar" placeholder="Confirmar email" required
+        style="padding:10px;border:1px solid #ccc;border-radius:6px;">
+
+        <input type="text" name="celular" value="{persona['celular']}" placeholder="Celular"
+        style="padding:10px;border:1px solid #ccc;border-radius:6px;">
+
+        <input type="date" name="fecha_nacimiento" value="{persona.get('fecha_nac','')}" required
+        style="padding:10px;border:1px solid #ccc;border-radius:6px;">
+
+        <input type="number" name="edad" min="1" max="100" placeholder="Edad"
+        style="padding:10px;border:1px solid #ccc;border-radius:6px;">
+
+        <select name="genero" style="padding:10px;border-radius:6px;">
+            <option value="">Seleccionar género</option>
+            <option value="M" {"selected" if persona.get("genero")=="M" else ""}>Masculino</option>
+            <option value="F" {"selected" if persona.get("genero")=="F" else ""}>Femenino</option>
+            <option value="X" {"selected" if persona.get("genero")=="X" else ""}>Otro</option>
+        </select>
+
+        <h3>Ubicación</h3>
+        """
+
+        # 🌍 País
+        salida += '<select name="pais_id" style="padding:10px;border-radius:6px;">'
+        for p in paises:
+            selected = "selected" if persona.get("pais_id") == p["id"] else ""
+            salida += f"<option value='{p['id']}' {selected}>{p['nombre']}</option>"
+        salida += "</select>"
+
+        # 🏙 Provincia
+        salida += '<select name="provincia_id" style="padding:10px;border-radius:6px;">'
+        for p in provincias:
+            selected = "selected" if persona.get("provincia_id") == p["id"] else ""
+            salida += f"<option value='{p['id']}' {selected}>{p['nombre']}</option>"
+        salida += "</select>"
 
         salida += f"""
-Género:<br>
-<select name='genero'>
-    <option value=''>Seleccionar</option>
-    <option value='M' {"selected" if persona.get("genero")=="M" else ""}>Masculino</option>
-    <option value='F' {"selected" if persona.get("genero")=="F" else ""}>Femenino</option>
-    <option value='X' {"selected" if persona.get("genero")=="X" else ""}>Otro</option>
-</select><br>
-"""
+        <input type="text" name="ciudad" value="{persona['ciudad']}" placeholder="Ciudad"
+        style="padding:10px;border:1px solid #ccc;border-radius:6px;">
 
-        salida += "País:<br>"
-        salida += "<select name='pais_id'>"
+        <h3>Redes (opcional)</h3>
 
-        for p in paises:
-            selected = ""
-            if persona.get("pais_id") == p["id"]:
-                selected = "selected"
+        <input type="text" name="instagram" placeholder="Instagram"
+        style="padding:10px;border:1px solid #ccc;border-radius:6px;">
 
-            salida += f"<option value='{p['id']}' {selected}>{p['nombre']}</option>"
+        <input type="text" name="strava" placeholder="Strava"
+        style="padding:10px;border:1px solid #ccc;border-radius:6px;">
 
-        salida += "</select><br>"
-        salida += "Provincia:<br>"
-        salida += "<select name='provincia_id'>"
+        <input type="text" name="facebook" placeholder="Facebook"
+        style="padding:10px;border:1px solid #ccc;border-radius:6px;">
+        """
 
-        for p in provincias:
-            selected = ""
-            if persona.get("provincia_id") == p["id"]:
-                selected = "selected"
-
-            salida += f"<option value='{p['id']}' {selected}>{p['nombre']}</option>"
- 
-        salida += "</select><br>"
-        salida += f"ciudad: <input type='text' name='ciudad' value='{persona['ciudad']}'><br>"
-
-        salida += f"Instagram: <input type='text' name='instagram'><br>"
-        salida += f"Strava: <input type='text' name='strava'><br>"
-        salida += f"Facebook: <input type='text' name='facebook'><br>"
-
-        # 👇 ACÁ VA
+        # 👕 Remera
         if str(distancia.get("incluye_remera")) == "1":
             salida += """
-            <br>
-            <b>Talle de remera</b><br>
-            <select name="remera" required>
+            <h3>Talle de remera</h3>
+            <select name="remera" required style="padding:10px;border-radius:6px;">
                 <option value="">Seleccionar</option>
                 <option>XS</option>
                 <option>S</option>
@@ -1016,24 +1038,29 @@ Género:<br>
                 <option>L</option>
                 <option>XL</option>
                 <option>XXL</option>
-            </select><br><br>
+            </select>
             """
 
-        salida += "Team existente:<br>"
-        salida += "<select name='team_id'>"
+        # 👥 Team
+        salida += '<h3>Equipo</h3>'
+        salida += '<select name="team_id" style="padding:10px;border-radius:6px;">'
         salida += "<option value=''>-- Sin equipo --</option>"
-
         for t in teams:
             salida += f"<option value='{t['id']}'>{t['nombre']}</option>"
+        salida += "</select>"
 
-        salida += "</select><br><br>"
+        salida += """
+        <input type="text" name="team_nuevo" placeholder="O escribir nuevo equipo"
+        style="padding:10px;border:1px solid #ccc;border-radius:6px;">
 
-        salida += "O escribir nuevo team:<br>"
-        salida += "<input type='text' name='team_nuevo'><br>"
-      
-                
-        salida += "<button type='submit'>Confirmar inscripción</button>"
-        salida += "</form>"
+        <button type="submit"
+        style="margin-top:20px;padding:14px;background:#2e7d32;color:white;border:none;border-radius:8px;font-size:16px;cursor:pointer;">
+        Confirmar inscripción
+        </button>
+
+        </form>
+        </div>
+        """
 
         return salida
 
