@@ -39,7 +39,7 @@ def ver_inscriptos(evento_id):
 
         COUNT(i.id) AS total,
 
-        SUM(CASE WHEN i.estado_pago = 'pagado' THEN 1 ELSE 0 END) AS pagados,
+        SUM(CASE WHEN i.estado_pago IN ('pagado','aprobado') THEN 1 ELSE 0 END) AS pagados,
         SUM(CASE WHEN i.estado_pago = 'pendiente' THEN 1 ELSE 0 END) AS pendientes,
         SUM(CASE WHEN i.estado_pago = 'vencido' THEN 1 ELSE 0 END) AS vencidos
 

@@ -463,11 +463,7 @@ def ver_evento(evento_id):
     salida = f"""
     <div style="max-width:900px;margin:auto;margin-top:30px">
 
-    <div style="
-    display:flex;
-    gap:20px;
-    align-items:stretch;
-    ">
+    salida += '<div style="display:flex; gap:20px; align-items:stretch; flex-wrap:wrap;">'
 
     <div style="flex:1">
 
@@ -525,13 +521,7 @@ def ver_evento(evento_id):
     {evento['nombre']}
     </h1>
 
-    <div style="
-    display:flex;
-    justify-content:center;
-    gap:20px;
-    margin-top:10px;
-    font-size:18px;
-    ">
+    <div style="display:flex; justify-content:center; gap:20px; margin-top:10px; font-size:18px; flex-wrap:wrap; text-align:center;">
 
     <div>📅 {evento['fecha'].strftime('%d/%m/%Y')}</div>
     <div>📍 {evento.get('direccion') or evento['lugar']}</div>
@@ -849,14 +839,50 @@ def inscribirse(evento_id):
 
     if request.method == "GET":
         return f"""
-        <h1>Inscripción {nombre_evento}</h1>
-        <form method="POST">
+        <div style="max-width:400px;margin:80px auto;font-family:Arial;text-align:center">
 
-            <input type="hidden" name="distancia_id" value="{distancia_id}">
-            <input type="text" name="dni" maxlength="8"  
-            oninput="this.value=this.value.replace(/[^0-9]/g,'')" required>
-            <button type="submit" name="accion" value="buscar">Continuar</button>
+        <h2 style="margin-bottom:10px">🏁 Inscribite</h2>
+
+        <div style="color:#555;margin-bottom:25px">
+        Evento: <b>{nombre_evento}</b>
+        </div>
+
+        <form method="POST" style="display:flex;flex-direction:column;gap:15px">
+
+        <input type="hidden" name="distancia_id" value="{distancia_id}">
+
+        <input type="text" name="dni" placeholder="Ingresá tu DNI"
+        maxlength="8"
+        oninput="this.value=this.value.replace(/[^0-9]/g,'')"
+        style="
+        padding:12px;
+        font-size:16px;
+        border-radius:6px;
+        border:1px solid #ccc;
+        text-align:center;
+        "
+        required>
+
+        <button type="submit" name="accion" value="buscar"
+        style="
+        padding:12px;
+        font-size:16px;
+        background:#2e7d32;
+        color:white;
+        border:none;
+        border-radius:6px;
+        cursor:pointer;
+        ">
+        Continuar inscripción
+        </button>
+
         </form>
+
+        <div style="margin-top:20px;color:#777;font-size:13px">
+        Ingresá tu DNI para buscar o crear tu registro
+        </div>
+
+        </div>
         """
            
     accion = request.form.get("accion")
@@ -1394,7 +1420,7 @@ def panel_evento(evento_id):
     SELECT COUNT(*) as total
     FROM inscripciones
     WHERE evento_id = %s
-    AND estado_pago = 'pagado'
+    AND estado_pago IN ('pagado','aprobado')
     """, (evento_id,))
     total_pagados = cursor.fetchone()["total"]
     if total_inscriptos > 0:
