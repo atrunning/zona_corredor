@@ -19,8 +19,9 @@ from flask import request
 sdk = mercadopago.SDK(os.getenv("MP_ACCESS_TOKEN"))
 
 import os
-print("🔥 BASE_URL EN PRODUCCION:", BASE_URL)
+
 BASE_URL = os.getenv("BASE_URL", "http://localhost:5000")
+print("🔥 BASE_URL EN PRODUCCION:", BASE_URL)
 
 def slugify(texto):
     texto = texto.lower()
