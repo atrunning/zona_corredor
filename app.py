@@ -134,9 +134,7 @@ def layout(contenido, menu=True, evento_id=None, eventos=None):
 
 
 from urllib.parse import urlencode
-@app.route("/")
-def home():
-    return "Zona Corredor funcionando 🚀"
+
 
 @app.route("/conectar_mp")
 def conectar_mp():
