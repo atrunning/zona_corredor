@@ -8,6 +8,19 @@ from routes.organizador import organizador_bp
 from routes.eventos import eventos_bp
 from flask import session, redirect
 import re
+from routes.pagos import pagos_bp
+app.register_blueprint(pagos_bp)
+import os
+import mercadopago
+
+import requests
+from flask import request
+
+sdk = mercadopago.SDK(os.getenv("MP_ACCESS_TOKEN"))
+
+import os
+
+BASE_URL = os.getenv("BASE_URL", "http://localhost:5000")
 
 def slugify(texto):
     texto = texto.lower()
@@ -17,7 +30,7 @@ def slugify(texto):
 
 app.register_blueprint(organizador_bp)
 app.register_blueprint(eventos_bp)
-
+print("🔥 VERSION NUEVA 🔥")
 def layout(contenido, menu=True, evento_id=None, eventos=None):
 
 
@@ -43,7 +56,13 @@ def layout(contenido, menu=True, evento_id=None, eventos=None):
             <a href="/evento/{evento_id}/exportar">Exportar inscriptos</a><br><br>
             <a href="/evento/{evento_id}/exportar_seguro">Exportar seguro</a><br><br>
             <a href="/evento/{evento_id}/reporte_remeras">Reporte de remeras</a><br><br>
+
+            <hr>
+
+            <b>💳 MercadoPago</b><br>
+            <a href="/conectar_mp">🔗 Conectar MercadoPago</a><br><br>
             """
+            
 
         menu_html += """
         
@@ -112,6 +131,73 @@ def layout(contenido, menu=True, evento_id=None, eventos=None):
     </html>
     """
 
+
+from urllib.parse import urlencode
+
+@app.route("/conectar_mp")
+def conectar_mp():
+    organizador_id = session.get("organizador_id")
+
+    params = {
+        "client_id": "7256036373469790",
+        "response_type": "code",
+        "scope": "read write offline_access",
+        "state": str(organizador_id),
+        "redirect_uri": f"{BASE_URL}/mp_callback"
+    }
+
+    url = "https://auth.mercadopago.com/authorization?" + urlencode(params)
+
+    return redirect(url)
+
+@app.route("/mp_callback")
+def mp_callback():
+    code = request.args.get("code")
+    organizador_id = request.args.get("state")
+
+    if not code:
+        return f"ERROR MP: {request.args}"
+
+    url = "https://api.mercadopago.com/oauth/token"
+
+    payload = {
+        "client_id": "7256036373469790",
+        "client_secret": os.getenv("MP_CLIENT_SECRET"),
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": f"{BASE_URL}/mp_callback"
+    }
+
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
+
+    response = requests.post(url, data=payload, headers=headers)
+    data = response.json()
+
+    print("MP TOKEN:", data)
+
+    if "access_token" not in data:
+        return f"ERROR TOKEN: {data}"
+
+    access_token = data["access_token"]
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    UPDATE organizadores
+    SET access_token_mp = %s
+    WHERE id = %s
+    """, (access_token, organizador_id))
+
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    # 👉 guardar en DB con organizador_id
+
+    return "MP conectado correctamente 🎉"
 @app.route("/")
 def inicio():
     conn = get_db_connection()
@@ -459,22 +545,32 @@ def ver_evento(evento_id):
     WHERE evento_id = %s
     """,(evento_id,))
     distancias = cursor.fetchall()
+
+    cursor.execute("SELECT DATABASE()")
+    print("DB:", cursor.fetchone())
+
+    cursor.execute("SHOW COLUMNS FROM distancias")
+    print("COLUMNAS:", cursor.fetchall())
    
     salida = f"""
-    <div style="max-width:900px;margin:auto;margin-top:30px">
-
-    salida += '<div style="display:flex; gap:20px; align-items:stretch; flex-wrap:wrap;">'
-
-    <div style="flex:1">
-
-    <img src="/static/eventos/{imagen}"
-    style="
-    width:100%;
-    height:320px;
-    object-fit:cover;
-    border-radius:10px;
+    <div style="max-width:1000px;margin:auto;padding:20px">
+    """
+    salida += f"""
+    <div style="
+    display:flex;
+    gap:20px;
+    align-items:stretch;
+    flex-wrap:wrap;
     ">
 
+    <div style="flex:1; min-width:300px">
+        <img src="/static/eventos/{imagen}"
+        style="
+        width:100%;
+        height:280px;
+        object-fit:cover;
+        border-radius:10px;
+        ">
     </div>
     """
 
@@ -1070,9 +1166,125 @@ def inscribirse(evento_id):
     
     if accion == "confirmar":
 
-        remera = request.form.get("remera")
-        distancia_id = request.form["distancia_id"]
+        distancia_id = request.form.get("distancia_id")
 
+        if not distancia_id:
+            return "Error: distancia perdida 😈"
+
+         
+        from datetime import date, datetime
+
+        fecha_nac = request.form.get("fecha_nacimiento")
+
+        if not fecha_nac:
+            return "Falta fecha de nacimiento"
+
+        fecha_nac = datetime.strptime(fecha_nac, "%Y-%m-%d").date()
+
+        hoy = date.today()
+
+        edad = hoy.year - fecha_nac.year - (
+            (hoy.month, hoy.day) < (fecha_nac.month, fecha_nac.day)
+        )
+
+        # 🔥 traer limites de edad
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        cursor.execute("""
+        SELECT edad_min, edad_max, validar_edad
+        FROM distancias
+        WHERE id = %s
+        """, (distancia_id,))
+
+        dist = cursor.fetchone()
+
+        if not dist:
+            cursor.close()
+            conn.close()
+            return "Error: distancia no encontrada"
+
+        if dist.get("validar_edad"):
+
+            edad_min = dist.get("edad_min")
+            edad_max = dist.get("edad_max")
+
+            if edad_min is not None and edad < edad_min:
+                return f"""
+                <div style="
+                    max-width:420px;
+                    margin:60px auto;
+                    padding:25px;
+                    border-radius:14px;
+                    background:linear-gradient(135deg,#fff,#ffecec);
+                    border:1px solid #ffb3b3;
+                    text-align:center;
+                    font-family:Arial;
+                    box-shadow:0 10px 25px rgba(0,0,0,0.1);
+                ">
+                    <h2 style="color:#d32f2f;">🚫 Ups… no podés inscribirte</h2>
+
+                    <p style="font-size:15px;color:#444;">
+                        Esta distancia es para mayores de <b>{edad_min} años</b>.
+                    </p>
+
+                    <br>
+
+                    <button onclick="window.history.back()" style="
+                        padding:10px 20px;
+                        border:none;
+                        border-radius:8px;
+                        background:#1976d2;
+                        color:white;
+                        font-weight:bold;
+                        cursor:pointer;
+                    ">
+                        ← Volver
+                    </button>
+                </div>
+                """
+
+            if edad_max is not None and edad > edad_max:
+                return f"""
+                <div style="
+                    max-width:420px;
+                    margin:60px auto;
+                    padding:25px;
+                    border-radius:14px;
+                    background:linear-gradient(135deg,#fff,#ffecec);
+                    border:1px solid #ffb3b3;
+                    text-align:center;
+                    font-family:Arial;
+                    box-shadow:0 10px 25px rgba(0,0,0,0.1);
+                ">
+                    <h2 style="color:#d32f2f;">🚫 Ups… no podés inscribirte</h2>
+
+                    <p style="font-size:15px;color:#444;">
+                        Esta distancia es hasta <b>{edad_max} años</b>.
+                    </p>
+
+                    <br>
+
+                    <button onclick="window.history.back()" style="
+                        padding:10px 20px;
+                        border:none;
+                        border-radius:8px;
+                        background:#1976d2;
+                        color:white;
+                        font-weight:bold;
+                        cursor:pointer;
+                    ">
+                        ← Volver
+                    </button>
+                </div>
+                """
+
+        cursor.close()
+        conn.close() 
+
+        
+        remera = request.form.get("remera")
+        
         persona_id = request.form["persona_id"]
         dni = request.form["dni"]
 
@@ -1091,11 +1303,7 @@ def inscribirse(evento_id):
 
         fecha_nacimiento = request.form.get("fecha_nacimiento", "").strip()
         
-        edad_evento = None
-
-        if fecha_nacimiento:
-            edad_evento = date.today().year - int(fecha_nacimiento[:4])
-        
+        edad_evento = edad        
 
         edad_ingresada = request.form.get("edad", "").strip()
 
@@ -1125,34 +1333,47 @@ def inscribirse(evento_id):
 
         talle_remera = request.form.get("remera")
 
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        cursor.execute("""
+        SELECT incluye_remera
+        FROM distancias
+        WHERE id = %s
+        """, (distancia_id,))
+
+        datos = cursor.fetchone()
+
         if datos["incluye_remera"] == 0:
             talle_remera = None
               
 
             
-            if edad_ingresada:
+        if edad_ingresada:
 
-                if not edad_ingresada.isdigit():
-                    cursor.close()
-                    conn.close()
-                    return "<h2>La edad debe ser un número.</h2>"
+            if not edad_ingresada.isdigit():
+                cursor.close()
+                conn.close()
+                return "<h2>La edad debe ser un número.</h2>"
 
-                edad_real = date.today().year - int(fecha_nacimiento[:4])
+            edad_real = date.today().year - int(fecha_nacimiento[:4])
 
-                if abs(int(edad_ingresada) - edad_real) > 1:
-                    cursor.close()
-                    conn.close()
+            if abs(int(edad_ingresada) - edad_real) > 1:
+                cursor.close()
+                conn.close()
 
-                    return """
-                    <script>
-                    alert("La edad no coincide con la fecha de nacimiento");
-                    window.history.back();
-                    </script>
-                    """
+                return """
+                <script>
+                alert("La edad no coincide con la fecha de nacimiento");
+                window.history.back();
+                </script>
+                """
 
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
-
+    
+        
+        
         # crear team si es nuevo
         if team_nuevo:
             cursor.execute(
@@ -1182,7 +1403,10 @@ def inscribirse(evento_id):
             return "<h2>Los emails no coinciden.</h2>"
 
         # crear persona si no existe
-        if persona_id == "":
+        cursor.execute("SELECT id FROM personas WHERE dni = %s", (dni,))
+        persona_existente = cursor.fetchone()
+
+        if not persona_existente:
 
             cursor.execute("""
             INSERT INTO personas
@@ -1209,7 +1433,7 @@ def inscribirse(evento_id):
             persona_id = cursor.lastrowid
 
         else:
-
+            persona_id = persona_existente["id"]
             cursor.execute("""
             UPDATE personas
             SET nombre=%s,
@@ -1247,11 +1471,24 @@ def inscribirse(evento_id):
 
         # verificar inscripción previa
         cursor.execute("""
-            SELECT id FROM inscripciones
+            SELECT id, estado_pago 
+            FROM inscripciones
             WHERE evento_id=%s AND persona_id=%s
         """, (evento_id, persona_id))
 
         existe = cursor.fetchone()
+
+        if existe:
+            if existe["estado_pago"] in ["pagado", "aprobado"]:
+                return "<h2>Ya estás inscripto y pagado en este evento.</h2>"
+
+            if existe["estado_pago"] == "pendiente":
+                return """
+                <h2>Ya tenés una inscripción pendiente de pago.</h2>
+                <p>Revisá tu email o intentá nuevamente más tarde.</p>
+                """
+
+       
 
         if existe:
             cursor.close()
@@ -1325,17 +1562,64 @@ def inscribirse(evento_id):
 
         conn.commit()
 
+        # 🔥 OBTENER TOKEN DEL ORGANIZADOR
+        cursor.execute("""
+        SELECT o.access_token_mp
+        FROM eventos e
+        JOIN organizadores o ON e.organizador_id = o.id
+        WHERE e.id = %s
+        """, (evento_id,))
+
+        organizador = cursor.fetchone()
+
+        if not organizador or not organizador.get("access_token_mp"):
+            return "Error: el organizador no tiene MercadoPago conectado"
+
+        access_token = organizador["access_token_mp"]
+
+        # 🔥 obtener precio
+        cursor.execute("""
+        SELECT precio
+        FROM distancias
+        WHERE id = %s
+        """, (distancia_id,))
+
+        dist = cursor.fetchone()
+        precio = dist["precio"]
+
+        comision = round(precio * 0.03, 2)
+        precio_final = precio + comision
+
+        # 🔥 crear pago
+        sdk = mercadopago.SDK(access_token)
+
+        preference_data = {
+            "items": [
+                {
+                    "title": f"Inscripción {nombre_evento}",
+                    "quantity": 1,
+                    "unit_price": round(precio_final, 2)
+                }
+            ],
+            "application_fee": round(comision, 2),
+            "external_reference": str(inscripcion_id),
+            "back_urls": {
+                "success": f"{BASE_URL}/pago_exitoso",
+                "failure": f"{BASE_URL}/pago_error",
+                "pending": f"{BASE_URL}/pago_pendiente"
+            },
+            "auto_return": "approved"
+        }
+
+        preference = sdk.preference().create(preference_data)
+        
+
         cursor.close()
         conn.close()
+        return redirect(preference["response"]["init_point"])
 
-        return f"""
-        <h2>Inscripción confirmada</h2>
-        <p>Número: {numero}</p>
-        <a href="/evento/{evento_id}">
-            <button>Volver al evento</button>
-        </a>
-        """       
-
+        
+                
 
 @app.route("/evento/<int:evento_id>/panel")
 def panel_evento(evento_id):
@@ -1387,6 +1671,11 @@ def panel_evento(evento_id):
     # -------------------
     # distancias
     # -------------------
+    cursor.execute("SELECT DATABASE()")
+    print("DB PANEL:", cursor.fetchone())
+
+    cursor.execute("SHOW COLUMNS FROM distancias")
+    print("COLUMNAS PANEL:", cursor.fetchall())
     cursor.execute("""
     SELECT 
         d.id,
@@ -1403,6 +1692,7 @@ def panel_evento(evento_id):
         ON d.id = i.distancia_id
         AND i.evento_id = %s
     WHERE d.evento_id = %s
+    AND d.activo = 1               
     GROUP BY d.id
     ORDER BY d.nombre
     """,(evento_id,evento_id))
@@ -1668,12 +1958,24 @@ def editar_distancia(evento_id, distancia_id):
             <option value="1" {"selected" if d['es_gratis']==1 else ""}>Sí</option>
         </select>
         <br>
+        <br><br>
 
-        <br>
-        <button type="submit">Guardar</button>
+        <label><b>Validar edad</b></label><br>
+        <input type="checkbox" name="validar_edad" value="1"
+        {"checked" if d.get("validar_edad") else ""}>
 
-        </form>
-        """
+        <br><br>
+
+        Edad mínima<br>
+        <input type="number" name="edad_min" value="{d.get('edad_min') or ''}"><br><br>
+
+        Edad máxima<br>
+        <input type="number" name="edad_max" value="{d.get('edad_max') or ''}"><br><br>
+                <br>
+                <button type="submit">Guardar</button>
+
+                </form>
+                """
 
         return layout(salida)
 
@@ -1686,6 +1988,15 @@ def editar_distancia(evento_id, distancia_id):
     fin = request.form["fin"]
     remera = request.form["remera"]
     gratis = request.form["gratis"]
+    validar_edad = request.form.get("validar_edad")
+    edad_min = request.form.get("edad_min")
+    edad_max = request.form.get("edad_max")
+
+    validar_edad = 1 if validar_edad else 0
+
+    if not validar_edad:
+        edad_min = None
+        edad_max = None
 
     cursor.execute("""
     UPDATE distancias
@@ -1695,9 +2006,12 @@ def editar_distancia(evento_id, distancia_id):
         fecha_inicio_inscripcion=%s,
         fecha_fin_inscripcion=%s,
         incluye_remera=%s,
-        es_gratis=%s
+        es_gratis=%s,
+        validar_edad=%s,
+        edad_min=%s,
+        edad_max=%s
     WHERE id=%s
-    """,(nombre,cupo,precio,inicio,fin,remera,gratis,distancia_id))
+    """,(nombre,cupo,precio,inicio,fin,remera,gratis,validar_edad,edad_min,edad_max,distancia_id))
 
     conn.commit()
 
@@ -1831,6 +2145,50 @@ def toggle_publicado(evento_id):
     window.location.href="/evento/{evento_id}/panel"
     </script>
     """
+@app.route("/webhook_mp", methods=["POST"])
+def webhook_mp():
+    data = request.json
+    print("WEBHOOK:", data)
+
+    # 1. Obtener payment_id
+    payment_id = data.get("data", {}).get("id")
+
+    if not payment_id:
+        return "NO PAYMENT ID", 200
+
+    # 2. Consultar a MercadoPago
+    payment = sdk.payment().get(payment_id)
+    payment_info = payment["response"]
+
+    print("PAYMENT INFO:", payment_info)
+
+    # 3. Verificar estado
+    if payment_info.get("status") == "approved":
+
+        inscripcion_id = payment_info.get("external_reference")
+
+        print("INSCRIPCION A ACTUALIZAR:", inscripcion_id)
+
+        # 4. Actualizar DB
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            UPDATE inscripciones
+            SET estado_pago = 'pagado',
+                acreditado = 1,
+                payment_id = %s
+            WHERE id = %s
+        """, (payment_id, inscripcion_id))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        print("✅ INSCRIPCION MARCADA COMO PAGADA")
+
+    return "OK", 200
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)

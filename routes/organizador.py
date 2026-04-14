@@ -50,7 +50,8 @@ def ver_inscriptos(evento_id):
         AND i.evento_id = %s
 
     WHERE d.evento_id = %s
-
+    AND d.activo = 1
+                   
     GROUP BY d.id
     """, (evento_id, evento_id))
 
@@ -126,11 +127,11 @@ def ver_inscriptos(evento_id):
         padding:15px;
         border-radius:10px;
         width:220px;
-        border-left:6px solid #1976d2
+        border-left:6px solid #1976d2a
         '>
         <b>{d['nombre']}</b><br><br>
 
-        Total: ${"{:,.0f}".format(d['total']).replace(",", ".")}<br>
+        Total: {"{:,.0f}".format(d['total']).replace(",", ".")}<br>
         <span style='color:green'>Pagados: {d['pagados']}</span><br>
         <span style='color:orange'>Pendientes: {d['pendientes']}</span><br>
         <span style='color:red'>Vencidos: {d['vencidos']}</span>
@@ -747,24 +748,55 @@ def administrar_distancias(evento_id):
     # ---------- crear distancia ----------
     if request.method == "POST":
 
-        nombre = request.form["nombre"]
-        cupo = request.form["cupo"]
-        print("FORM RECIBIDO:", request.form)
+        accion = request.form.get("accion")
+
+        # ELIMINAR
+        if accion == "eliminar":
+            distancia_id = request.form.get("distancia_id")
+
+            cursor.execute("""
+                UPDATE distancias
+                SET activo = 0
+                WHERE id = %s AND evento_id = %s
+            """, (distancia_id, evento_id))
+
+            conn.commit()
+            return redirect(request.url)
+
+        # CREAR
+        nombre = request.form.get("nombre")
+        cupo = request.form.get("cupo", 200)
         precio = request.form.get("precio", 0)
 
         fecha_inicio = request.form.get("fecha_inicio")
         fecha_fin = request.form.get("fecha_fin")
-        incluye_remera = request.form.get("incluye_remera", 0)
-        es_gratis = request.form.get("es_gratis", 0)
 
+        incluye_remera = 1 if request.form.get("incluye_remera") else 0
+        es_gratis = 1 if request.form.get("es_gratis") else 0
+
+        validar_edad = 1 if request.form.get("validar_edad") else 0
+        edad_min = request.form.get("edad_min")
+        edad_max = request.form.get("edad_max")
+
+        if not validar_edad:
+            edad_min = None
+            edad_max = None
+
+        if not nombre:
+            return "Error: falta nombre"
+
+        # ✅ INSERT REAL
         cursor.execute("""
-            INSERT INTO distancias
-            (evento_id, nombre, cupo, precio,
-            fecha_inicio_inscripcion,
-            fecha_fin_inscripcion,
-            incluye_remera,
-            es_gratis)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+        INSERT INTO distancias
+        (evento_id, nombre, cupo, precio,
+        fecha_inicio_inscripcion,
+        fecha_fin_inscripcion,
+        incluye_remera,
+        es_gratis,
+        validar_edad,
+        edad_min,
+        edad_max)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """, (
             evento_id,
             nombre,
@@ -773,7 +805,42 @@ def administrar_distancias(evento_id):
             fecha_inicio,
             fecha_fin,
             incluye_remera,
-            es_gratis
+            es_gratis,
+            validar_edad,
+            edad_min,
+            edad_max
+        ))
+
+        conn.commit()
+
+        return redirect(request.url)
+    
+        if not nombre:
+                return "Error: falta nombre"
+        
+        cursor.execute("""
+        INSERT INTO distancias
+        (evento_id, nombre, cupo, precio,
+        fecha_inicio_inscripcion,
+        fecha_fin_inscripcion,
+        incluye_remera,
+        es_gratis,
+        validar_edad,
+        edad_min,
+        edad_max)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """, (
+            evento_id,
+            nombre,
+            cupo,
+            precio,
+            fecha_inicio,
+            fecha_fin,
+            incluye_remera,
+            es_gratis,
+            validar_edad,
+            edad_min,
+            edad_max
         ))
 
         conn.commit()
@@ -783,6 +850,7 @@ def administrar_distancias(evento_id):
         SELECT id, nombre, cupo, precio
         FROM distancias
         WHERE evento_id = %s
+        AND activo = 1
         ORDER BY id
     """, (evento_id,))
 
@@ -823,6 +891,18 @@ def administrar_distancias(evento_id):
         <option value="0">No</option>
         <option value="1">Sí</option>
     </select><br><br>
+    <br><br>
+
+    <label><b>Validar edad</b></label><br>
+    <input type="checkbox" name="validar_edad" value="1">
+
+    <br><br>
+
+    Edad mínima<br>
+    <input type="number" name="edad_min"><br><br>
+
+    Edad máxima<br>
+    <input type="number" name="edad_max"><br><br>
 
     <button type="submit">Agregar competencia</button>
 
@@ -865,12 +945,22 @@ def administrar_distancias(evento_id):
     for d in distancias:
 
         salida += f"""
-        <tr>
-            <td>{d['nombre']}</td>
-            <td>{d['cupo']}</td>
-            <td>{d['precio']}</td>
-        </tr>
-        """
+            <tr>
+                <td>{d['nombre']}</td>
+                <td>{d['cupo']}</td>
+                <td>{d['precio']}</td>
+                <td>
+                    <form method="POST" style="display:inline;">
+                        <input type="hidden" name="accion" value="eliminar">
+                        <input type="hidden" name="distancia_id" value="{d['id']}">
+                        <button onclick="return confirm('¿Eliminar distancia?')">
+                            ❌
+                        </button>
+                    </form>
+                </td>
+            </tr>
+            """
+        
 
     salida += "</table>"
     return layout(salida, evento_id=evento_id)
@@ -1059,10 +1149,11 @@ def editar_inscripcion(numero):
     cursor.execute("""
     SELECT d.id, d.nombre
     FROM distancias d
-    JOIN inscripciones i ON i.evento_id = d.evento_id
+    JOIN inscripciones i ON i.distancia_id = d.id
     WHERE i.numero_inscripcion = %s
+    AND d.activo = 1
     ORDER BY d.nombre
-    """,(numero,))
+    """, (numero,))
 
     distancias = cursor.fetchall()
     
@@ -2049,15 +2140,16 @@ def exportar_excel(evento_id):
         p.email,
         p.fecha_nac,
         p.genero,
+        c.nombre AS categoria,
         p.ciudad,
         p.direccion,
         pa.nombre AS pais,
         prov.nombre AS provincia,
-        d.nombre AS distancia,
-        c.nombre AS categoria,
+        d.nombre AS distancia,        
         i.estado_pago,
-        i.fecha_inscripcion,
-        pay.fecha_confirmacion AS fecha_pago,
+        pay.monto_total AS monto_pagado,
+        pay.fecha_pago,
+        i.fecha_inscripcion,        
         i.dorsal,
         i.talle_remera,
         t.nombre AS team
@@ -2068,8 +2160,15 @@ def exportar_excel(evento_id):
     LEFT JOIN provincias prov ON prov.id = p.provincia_id
     LEFT JOIN paises pa ON pa.id = p.pais_id
     LEFT JOIN categorias c ON c.id = i.categoria_id
-    LEFT JOIN pagos pay ON pay.inscripcion_id = i.id
-        AND pay.estado = 'aprobado'
+    LEFT JOIN (
+        SELECT 
+            inscripcion_id,
+            SUM(monto) AS monto_total,
+            MAX(fecha_confirmacion) AS fecha_pago
+        FROM pagos
+        WHERE estado = 'aprobado'
+        GROUP BY inscripcion_id
+    ) pay ON pay.inscripcion_id = i.id
     JOIN eventos e ON e.id = i.evento_id
     WHERE i.evento_id = %s
     """
@@ -2110,14 +2209,16 @@ def exportar_excel(evento_id):
         "Fecha Nacimiento",
         "Edad",
         "Género",
-        "Provincia",
         "Categoría",
+        "Provincia",
+        "País",        
         "Ciudad",
         "Dirección",
         "Distancia",
         "Estado",
-        "Fecha inscripción",
+        "Monto Pagado",
         "Fecha Pago",
+        "Fecha inscripción",        
         "Dorsal",
         "Team",
         "Talle Remera"
@@ -2146,14 +2247,16 @@ def exportar_excel(evento_id):
             d["fecha_nac"].strftime("%d/%m/%Y") if d["fecha_nac"] else "",
             edad,
             d["genero"] or "",
-            d["provincia"] or "",
             d["categoria"] or "",
+            d["provincia"] or "",
+            d["pais"] or "",
             d["ciudad"] or "",
             d["direccion"] or "",
             d["distancia"],
             estado_txt,
-            d["fecha_inscripcion"].strftime("%d/%m/%Y %H:%M") if d["fecha_inscripcion"] else "",
+            d["monto_pagado"] or "",  # 💰 NUEVO
             d["fecha_pago"].strftime("%d/%m/%Y %H:%M") if d["fecha_pago"] else "",
+            d["fecha_inscripcion"].strftime("%d/%m/%Y %H:%M") if d["fecha_inscripcion"] else "",
             d["dorsal"] or "",
             d["team"] or "",
             d["talle_remera"] or ""
