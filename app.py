@@ -15,7 +15,7 @@ import mercadopago
 
 import requests
 from flask import request
-
+from decimal import Decimal
 
 import os
 
@@ -1588,7 +1588,7 @@ def inscribirse(evento_id):
         dist = cursor.fetchone()
         precio = dist["precio"]
 
-        comision = round(precio * 0.03, 2)
+        comision = round(precio * Decimal("0.03"), 2)
         precio_final = precio + comision
 
         # 🔥 crear pago
