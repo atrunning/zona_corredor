@@ -1592,6 +1592,7 @@ def inscribirse(evento_id):
         precio_final = precio + comision
 
         # 🔥 crear pago
+        # 🔥 crear pago
         sdk = mercadopago.SDK(access_token)
 
         preference_data = {
@@ -1599,10 +1600,10 @@ def inscribirse(evento_id):
                 {
                     "title": f"Inscripción {nombre_evento}",
                     "quantity": 1,
-                    "unit_price": round(precio_final, 2)
+                    "unit_price": round(precio, 2)  # 🔥 usamos precio directo
                 }
             ],
-            "application_fee": round(comision, 2),
+            # "application_fee": round(comision, 2),  ❌ desactivado por ahora
             "external_reference": str(inscripcion_id),
             "back_urls": {
                 "success": f"{BASE_URL}/pago_exitoso",
