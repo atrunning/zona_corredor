@@ -16,7 +16,6 @@ import mercadopago
 import requests
 from flask import request
 
-sdk = mercadopago.SDK(os.getenv("MP_ACCESS_TOKEN"))
 
 import os
 
@@ -135,20 +134,22 @@ def layout(contenido, menu=True, evento_id=None, eventos=None):
 
 from urllib.parse import urlencode
 
-
 @app.route("/conectar_mp")
 def conectar_mp():
     organizador_id = session.get("organizador_id")
 
+    if not organizador_id:
+        return redirect("/login")  # 🔥 ESTO FALTABA
+
     params = {
-        "client_id": "7256036373469790",
+        "client_id": os.getenv("MP_CLIENT_ID"),
         "response_type": "code",
         "scope": "read write offline_access",
         "state": str(organizador_id),
-        "redirect_uri": f"{BASE_URL}/mp_callback"
+        "redirect_uri": f"{os.getenv('BASE_URL')}/mp_callback"
     }
 
-    url = "https://auth.mercadopago.com/authorization?" + urlencode(params)
+    url = "https://auth.mercadopago.com.ar/authorization?" + urlencode(params)
 
     return redirect(url)
 
@@ -163,11 +164,11 @@ def mp_callback():
     url = "https://api.mercadopago.com/oauth/token"
 
     payload = {
-        "client_id": "7256036373469790",
+        "client_id": os.getenv("MP_CLIENT_ID"),  # 🔥 FIX ACÁ
         "client_secret": os.getenv("MP_CLIENT_SECRET"),
         "grant_type": "authorization_code",
         "code": code,
-        "redirect_uri": f"{BASE_URL}/mp_callback"
+        "redirect_uri": f"{os.getenv('BASE_URL')}/mp_callback"  # 🔥 también consistente
     }
 
     headers = {
@@ -196,8 +197,6 @@ def mp_callback():
     conn.commit()
     cursor.close()
     conn.close()
-
-    # 👉 guardar en DB con organizador_id
 
     return "MP conectado correctamente 🎉"
 @app.route("/")
