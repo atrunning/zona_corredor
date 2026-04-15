@@ -1600,7 +1600,7 @@ def inscribirse(evento_id):
                 {
                     "title": f"Inscripción {nombre_evento}",
                     "quantity": 1,
-                    "unit_price": round(precio, 2)  # 🔥 usamos precio directo
+                    "unit_price": float(round(precio, 2))  # 🔥 usamos precio directo
                 }
             ],
             # "application_fee": round(comision, 2),  ❌ desactivado por ahora
