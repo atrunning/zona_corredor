@@ -199,6 +199,51 @@ def mp_callback():
     conn.close()
 
     return "MP conectado correctamente 🎉"
+@app.route("/webhook_mp", methods=["POST"])
+def webhook_mp():
+    data = request.json
+
+    print("WEBHOOK:", data)
+
+    if "data" in data and "id" in data["data"]:
+        payment_id = data["data"]["id"]
+
+        # 🔥 CREAR SDK (ACÁ ESTABA EL ERROR)
+        sdk = mercadopago.SDK(os.getenv("MP_ACCESS_TOKEN"))
+
+        payment = sdk.payment().get(payment_id)
+        info = payment["response"]
+
+        print("PAGO INFO:", info)
+
+        if info.get("status") == "approved":
+            inscripcion_id = info.get("external_reference")
+            comprobante = info.get("id")
+            monto = info.get("transaction_amount", 0)
+
+            conn = get_db_connection()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+            UPDATE pagos
+            SET estado = 'aprobado',
+                monto = %s,
+                referencia_externa = %s,
+                fecha_confirmacion = NOW()
+            WHERE inscripcion_id = %s
+            """, (float(monto), comprobante, inscripcion_id))
+
+            cursor.execute("""
+            UPDATE inscripciones
+            SET estado_pago = 'pagado'
+            WHERE id = %s
+            """, (inscripcion_id,))
+
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+    return "ok", 200
 @app.route("/")
 def inicio():
     conn = get_db_connection()
@@ -2166,49 +2211,6 @@ def toggle_publicado(evento_id):
     window.location.href="/evento/{evento_id}/panel"
     </script>
     """
-@app.route("/webhook_mp", methods=["POST"])
-def webhook_mp():
-    data = request.json
-    print("WEBHOOK:", data)
-
-    # 1. Obtener payment_id
-    payment_id = data.get("data", {}).get("id")
-
-    if not payment_id:
-        return "NO PAYMENT ID", 200
-
-    # 2. Consultar a MercadoPago
-    payment = sdk.payment().get(payment_id)
-    payment_info = payment["response"]
-
-    print("PAYMENT INFO:", payment_info)
-
-    # 3. Verificar estado
-    if payment_info.get("status") == "approved":
-
-        inscripcion_id = payment_info.get("external_reference")
-
-        print("INSCRIPCION A ACTUALIZAR:", inscripcion_id)
-
-        # 4. Actualizar DB
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            UPDATE inscripciones
-            SET estado_pago = 'pagado',
-                acreditado = 1,
-                payment_id = %s
-            WHERE id = %s
-        """, (payment_id, inscripcion_id))
-
-        conn.commit()
-        cursor.close()
-        conn.close()
-
-        print("✅ INSCRIPCION MARCADA COMO PAGADA")
-
-    return "OK", 200
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
