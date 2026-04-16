@@ -39,7 +39,7 @@ def ver_inscriptos(evento_id):
 
         COUNT(i.id) AS total,
 
-        SUM(CASE WHEN i.estado_pago IN ('pagado','aprobado') THEN 1 ELSE 0 END) AS pagados,
+        SUM(CASE WHEN i.estado_pago = 'pagado' THEN 1 ELSE 0 END) AS pagados,
         SUM(CASE WHEN i.estado_pago = 'pendiente' THEN 1 ELSE 0 END) AS pendientes,
         SUM(CASE WHEN i.estado_pago = 'vencido' THEN 1 ELSE 0 END) AS vencidos
 
@@ -215,7 +215,7 @@ def ver_inscriptos(evento_id):
 
         estado_db = ins["estado_pago"]
 
-        if estado_db in ["pagado", "aprobado"]:
+        if estado_db == "pagado":
             estado = "<span style='background:#4caf50;color:white;padding:4px 8px;border-radius:4px'>Pagado</span>"
         elif estado_db == "pendiente":
             estado = "<span style='background:#ff9800;color:white;padding:4px 8px;border-radius:4px'>Pendiente</span>"
@@ -1601,7 +1601,19 @@ def pantalla_pago(numero):
         monto = request.form["monto"]
         estado = request.form["estado"]
         metodo = request.form["metodo"]
+        
+        cursor.execute("""
+        SELECT id FROM pagos
+        WHERE inscripcion_id = (
+            SELECT id FROM inscripciones WHERE numero_inscripcion=%s
+        )
+        AND estado = 'aprobado'
+        """, (numero,))
 
+        existe_pago = cursor.fetchone()
+
+        if existe_pago:
+            return "<h2>⚠️ Esta inscripción ya tiene un pago aprobado</h2>"
         if estado == "pagado":
             estado = "aprobado"
 
@@ -1614,9 +1626,9 @@ def pantalla_pago(numero):
 
         cursor.execute("""
         UPDATE inscripciones
-        SET estado_pago=%s
+        SET estado_pago='pagado'
         WHERE id=%s
-        """, (estado, inscripcion_id))
+        """, (inscripcion_id))
 
         conn.commit()
 
@@ -2180,7 +2192,7 @@ def exportar_excel(evento_id):
     # filtro estado
     if estado:
         if estado == "pagado":
-            query += " AND i.estado_pago = 'aprobado'"
+            query += " AND i.estado_pago = 'pagado'"
         else:
             query += " AND i.estado_pago = %s"
             params.append(estado)
