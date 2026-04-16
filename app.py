@@ -220,6 +220,7 @@ def webhook_mp():
             inscripcion_id = info.get("external_reference")
             comprobante = info.get("id")
             monto = info.get("transaction_amount", 0)
+            comision = round(float(monto) * 0.03, 2)
 
             conn = get_db_connection()
             cursor = conn.cursor()
@@ -229,9 +230,10 @@ def webhook_mp():
             SET estado = 'aprobado',
                 monto = %s,
                 referencia_externa = %s,
-                fecha_confirmacion = NOW()
+                fecha_confirmacion = NOW(),
+                comision = %s
             WHERE inscripcion_id = %s
-            """, (float(monto), comprobante, inscripcion_id))
+            """, (float(monto), comprobante, comision, inscripcion_id))
 
             cursor.execute("""
             UPDATE inscripciones
