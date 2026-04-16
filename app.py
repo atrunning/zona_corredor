@@ -1562,6 +1562,25 @@ def inscribirse(evento_id):
         )
 
         conn.commit()
+        cursor.execute("""
+        INSERT INTO pagos (
+            inscripcion_id,
+            monto,
+            metodo,
+            estado,
+            referencia_externa,
+            fecha_creacion
+        )
+        VALUES (%s, %s, %s, %s, %s, NOW())
+        """, (
+            inscripcion_id,
+            float(0),  # después lo mejoramos
+            "mercadopago",
+            "pendiente",
+            str(inscripcion_id)
+        ))
+
+        conn.commit()
 
         # 🔥 OBTENER TOKEN DEL ORGANIZADOR
         cursor.execute("""
