@@ -220,7 +220,8 @@ def webhook_mp():
             inscripcion_id = info.get("external_reference")
             comprobante = info.get("id")
             monto = info.get("transaction_amount", 0)
-            comision = round(float(monto) * 0.03, 2)
+            precio = float(monto) / 1.03
+            comision = round(float(monto) - precio, 2)
 
             conn = get_db_connection()
             cursor = conn.cursor()
@@ -233,6 +234,8 @@ def webhook_mp():
                 fecha_confirmacion = NOW(),
                 comision = %s
             WHERE inscripcion_id = %s
+            AND estado = 'pendiente'
+            AND metodo = 'mercadopago'
             """, (float(monto), comprobante, comision, inscripcion_id))
 
             cursor.execute("""
@@ -447,54 +450,8 @@ def login():
     cursor.close()
     conn.close()
 
-    return """
-
-<script>
-window.location.href="/organizador"
-</script>
-"""
-
-    # ---------------------------
-    # SI NO EXISTE → CREAR
-    # ---------------------------
-    if not org:
-
-        cursor.execute("""
-            INSERT INTO organizadores (nombre, email, password)
-            VALUES (%s, %s, %s)
-        """, (nombre if nombre else "Organizador", email, password))
-
-        conn.commit()
-        organizador_id = cursor.lastrowid
-
-    # ---------------------------
-    # SI EXISTE → VALIDAR PASSWORD
-    # ---------------------------
-    else:
-
-        if org["password"] != password:
-            return "<h2>❌ Contraseña incorrecta</h2>"
-
-        organizador_id = org["id"]
-
-    cursor.close()
-    conn.close()
-
-    session["organizador_id"] = organizador_id
-
-    return """
-    <script>
-    window.location.href="/organizador"
-    </script>
-    """
-    # guardar sesión
-    session["organizador_id"] = organizador_id
-
-    return """
-    <script>
-    window.location.href="/organizador"
-    </script>
-    """
+        
+        
 @app.route("/registro", methods=["GET", "POST"])
 def registro():
 
@@ -770,8 +727,12 @@ def ver_evento(evento_id):
 
         hoy = date.today()
 
-        precio = "Gratis" if d["es_gratis"] else f"${int(d['precio']):,}".replace(",", ".")
-        remera = "👕 incluye remera" if d["incluye_remera"] else ""
+        if d["es_gratis"]:
+            precio = "Gratis"
+        else:
+            base = f"${int(d['precio']):,}".replace(",", ".")
+            precio = f"{base} + costo de plataforma"
+            remera = "👕 incluye remera" if d["incluye_remera"] else ""
 
         inicio = d["fecha_inicio_inscripcion"]
         fin = d["fecha_fin_inscripcion"]
@@ -789,10 +750,7 @@ def ver_evento(evento_id):
         disponibles = max(d["cupo"] - inscriptos, 0)
 
         if inscripcion_abierta and disponibles > 0:
-            boton = ...
-
-
-            
+                      
             if inscripcion_abierta and disponibles > 0:
 
                 boton = f"""
@@ -1609,6 +1567,16 @@ def inscribirse(evento_id):
         )
 
         conn.commit()
+
+        # 🔥 obtener precio
+        cursor.execute("""
+        SELECT precio
+        FROM distancias
+        WHERE id = %s
+        """, (distancia_id,))
+
+        dist = cursor.fetchone()
+        precio = dist["precio"]
         cursor.execute("""
         INSERT INTO pagos (
             inscripcion_id,
@@ -1621,7 +1589,7 @@ def inscribirse(evento_id):
         VALUES (%s, %s, %s, %s, %s, NOW())
         """, (
             inscripcion_id,
-            float(0),  # después lo mejoramos
+            float(precio),  # después lo mejoramos
             "mercadopago",
             "pendiente",
             str(inscripcion_id)
@@ -1644,15 +1612,7 @@ def inscribirse(evento_id):
 
         access_token = organizador["access_token_mp"]
 
-        # 🔥 obtener precio
-        cursor.execute("""
-        SELECT precio
-        FROM distancias
-        WHERE id = %s
-        """, (distancia_id,))
-
-        dist = cursor.fetchone()
-        precio = dist["precio"]
+        
 
         comision = round(precio * Decimal("0.03"), 2)
         precio_final = precio + comision

@@ -468,11 +468,8 @@ def panel_organizador():
     if "organizador_id" not in session:
         return redirect("/login")
 
-    organizador_id = session["organizador_id"]
-    organizador_id = session.get("organizador_id", 1)
-    evento_id = request.args.get("evento_id")
     organizador_id = session.get("organizador_id")
-
+    evento_id = request.args.get("evento_id")
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
@@ -488,14 +485,25 @@ def panel_organizador():
     cursor.close()
     conn.close()
     
-   
+    mensaje = ""
+
+    if request.args.get("ok") == "evento_creado":
+        mensaje = """
+        <div style="
+            background:#d4edda;
+            color:#155724;
+            padding:10px;
+            border-radius:5px;
+            margin-bottom:15px;
+        ">
+            ✅ Evento creado correctamente
+        </div>
+        """
     
   
-    salida = f"""
-<h1>Panel del organizador</h1>
-
-
-"""
+    salida = mensaje + f"""
+    <h1>Panel del organizador</h1>
+    """
 
     salida += """
     <a href="/organizador/nuevo_evento">
@@ -702,12 +710,7 @@ def nuevo_evento():
     cursor.close()
     conn.close()
 
-    return"""
-    <script>
-    alert("Evento creado correctamente");
-    window.location.href="/organizador";
-    </script>
-    """
+    return redirect("/organizador?ok=evento_creado")
     
 @organizador_bp.route("/evento/<int:evento_id>/toggle_inscripciones")
 def toggle_inscripciones(evento_id):
@@ -815,36 +818,7 @@ def administrar_distancias(evento_id):
 
         return redirect(request.url)
     
-        if not nombre:
-                return "Error: falta nombre"
         
-        cursor.execute("""
-        INSERT INTO distancias
-        (evento_id, nombre, cupo, precio,
-        fecha_inicio_inscripcion,
-        fecha_fin_inscripcion,
-        incluye_remera,
-        es_gratis,
-        validar_edad,
-        edad_min,
-        edad_max)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-        """, (
-            evento_id,
-            nombre,
-            cupo,
-            precio,
-            fecha_inicio,
-            fecha_fin,
-            incluye_remera,
-            es_gratis,
-            validar_edad,
-            edad_min,
-            edad_max
-        ))
-
-        conn.commit()
-
     # ---------- listar distancias ----------
     cursor.execute("""
         SELECT id, nombre, cupo, precio
@@ -996,6 +970,22 @@ def editar_inscripcion(numero):
     # -------------------------
     if request.method == "POST":
 
+        accion = request.form.get("accion")
+
+        if accion == "marcar_pagado":
+            cursor.execute("""
+            UPDATE inscripciones
+            SET estado_pago = 'pagado'
+            WHERE numero_inscripcion = %s
+            """, (numero,))
+
+            conn.commit()
+
+            cursor.close()
+            conn.close()
+
+            return redirect(f"/inscripcion/{numero}?ok=1")
+
         # -------------------------
         # REGISTRAR PAGO MANUAL
         # -------------------------
@@ -1092,8 +1082,8 @@ def editar_inscripcion(numero):
             talle_remera=%s
         WHERE numero_inscripcion=%s
         """, (dorsal, distancia_id, talle, numero))
-        conn.commit()
 
+        
         cursor.close()
         conn.close()
 
@@ -1382,6 +1372,13 @@ def editar_inscripcion(numero):
 
     <h2>Pagos</h2>
 
+    <form method="POST">
+        <input type="hidden" name="accion" value="marcar_pagado">
+        <button style="padding:10px;background:#4caf50;color:white;border:none;border-radius:5px">
+            💰 Marcar como pagado
+        </button>
+    </form>
+
     <a href="/inscripcion/{numero}/pago"
     style="
     display:inline-block;
@@ -1430,6 +1427,15 @@ def editar_inscripcion(numero):
             f_creacion = p['fecha_creacion'].strftime("%d/%m/%Y %H:%M") if p['fecha_creacion'] else "-"
             f_confirma = p['fecha_confirmacion'].strftime("%d/%m/%Y %H:%M") if p['fecha_confirmacion'] else "-"
 
+            if p["metodo"] == "mercadopago":
+                boton = "<span style='color:#888'>🔒</span>"
+            else:
+                boton = f"""
+                <a href="/pago/{p['id']}/editar">
+                    <button type="button">Editar</button>
+                </a>
+                """
+            
             salida += f"""
             <tr>
                 <td>{p['id']}</td>
@@ -1439,13 +1445,9 @@ def editar_inscripcion(numero):
                 <td>{p['referencia_externa'] or '-'}</td>
                 <td>{f_creacion}</td>
                 <td>{f_confirma}</td>
-                <td>
-                    <a href="/pago/{p['id']}/editar">
-                        <button type="button">Editar</button>
-                    </a>
-                </td>
+                <td>{boton}</td>
             </tr>
-            """
+            """    
 
     salida += """
     </table>
@@ -2178,7 +2180,7 @@ def exportar_excel(evento_id):
     # filtro estado
     if estado:
         if estado == "pagado":
-            query += " AND i.estado_pago IN ('pagado','aprobado')"
+            query += " AND i.estado_pago = 'aprobado'"
         else:
             query += " AND i.estado_pago = %s"
             params.append(estado)
