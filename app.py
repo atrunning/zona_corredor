@@ -445,10 +445,17 @@ def login():
     # ---------------------------
     # ✅ LOGIN OK
     # ---------------------------
+    
     session["organizador_id"] = org["id"]
 
     cursor.close()
     conn.close()
+
+    return """
+    <script>
+    window.location.href="/organizador"
+    </script>
+    """
 
         
         
