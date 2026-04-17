@@ -770,8 +770,7 @@ def ver_evento(evento_id):
     ">
 
     <!-- IZQUIERDA -->
-    <a href="/evento/{evento_id}/pagar">
-    <button style="
+    <button onclick="abrirVerificar()" style="
     padding:10px 20px;
     background:#607d8b;
     color:white;
@@ -780,9 +779,8 @@ def ver_evento(evento_id):
     font-size:14px;
     cursor:pointer;
     ">
-    🔍 Verificar Inscripción
+    🔍 Verificar inscripción
     </button>
-    </a>
 
     <!-- CENTRO -->
     <button onclick="abrirDistancias()" style="
@@ -798,8 +796,7 @@ def ver_evento(evento_id):
     </button>
 
     <!-- DERECHA -->
-    <a href="/evento/{evento_id}/pagar">
-    <button style="
+    <button onclick="abrirPagar()" style="
     padding:10px 20px;
     background:#ff9800;
     color:white;
@@ -810,7 +807,6 @@ def ver_evento(evento_id):
     ">
     💳 Pagar ahora
     </button>
-    </a>
 
     </div>
     """
