@@ -830,7 +830,119 @@ def ver_evento(evento_id):
     </div>
     </div>
     """
-    
+    salida += f"""
+
+    <!-- MODAL VERIFICAR -->
+    <div id="modalVerificar" style="
+    display:none;
+    position:fixed;
+    top:0;left:0;
+    width:100%;
+    height:100%;
+    background:rgba(0,0,0,0.55);
+    justify-content:center;
+    align-items:center;
+    z-index:9999;
+    ">
+
+    <div style="
+    background:white;
+    padding:30px;
+    border-radius:14px;
+    width:420px;
+    max-width:90%;
+    text-align:center;
+    ">
+
+    <h2>🔍 Verificar inscripción</h2>
+
+    <form method="POST" action="/evento/{evento_id}/verificar">
+    <input type="text" name="dni" placeholder="Ingresá DNI"
+    style="width:100%;padding:12px;border:1px solid #ccc;border-radius:8px;">
+    <br><br>
+
+    <button style="
+    padding:10px 25px;
+    background:#607d8b;
+    color:white;
+    border:none;
+    border-radius:8px;
+    ">
+    Consultar
+    </button>
+    </form>
+
+    <br>
+    <button onclick="cerrarVerificar()">Cerrar</button>
+
+    </div>
+    </div>
+
+    <!-- MODAL PAGAR -->
+    <div id="modalPagar" style="
+    display:none;
+    position:fixed;
+    top:0;left:0;
+    width:100%;
+    height:100%;
+    background:rgba(0,0,0,0.55);
+    justify-content:center;
+    align-items:center;
+    z-index:9999;
+    ">
+
+    <div style="
+    background:white;
+    padding:30px;
+    border-radius:14px;
+    width:420px;
+    max-width:90%;
+    text-align:center;
+    ">
+
+    <h2>💳 Pagar inscripción</h2>
+
+    <form method="POST" action="/evento/{evento_id}/pagar">
+    <input type="text" name="dni" placeholder="Ingresá DNI"
+    style="width:100%;padding:12px;border:1px solid #ccc;border-radius:8px;">
+    <br><br>
+
+    <button style="
+    padding:10px 25px;
+    background:#ff9800;
+    color:white;
+    border:none;
+    border-radius:8px;
+    ">
+    Continuar
+    </button>
+    </form>
+
+    <br>
+    <button onclick="cerrarPagar()">Cerrar</button>
+
+    </div>
+    </div>
+
+    <script>
+    function abrirVerificar(){{
+    document.getElementById("modalVerificar").style.display="flex";
+    }}
+
+    function cerrarVerificar(){{
+    document.getElementById("modalVerificar").style.display="none";
+    }}
+
+    function abrirPagar(){{
+    document.getElementById("modalPagar").style.display="flex";
+    }}
+
+    function cerrarPagar(){{
+    document.getElementById("modalPagar").style.display="none";
+    }}
+    </script>
+
+    """
 
     salida += """
     <div style="
