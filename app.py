@@ -321,6 +321,8 @@ def pagar_evento(evento_id):
 
     cursor.execute("""
     SELECT 
+        p.nombre,
+        p.apellido           
         i.numero_inscripcion,
         i.estado_pago,
         d.nombre as distancia,
@@ -341,38 +343,79 @@ def pagar_evento(evento_id):
     cursor.close()
     conn.close()
 
-    salida = "<h3>Resultado</h3>"
+    salida = ""
 
     for i in inscripciones:
 
         estado = i["estado_pago"]
         precio = float(i["precio"])
+        nombre = i["nombre"] + " " + i["apellido"]
 
         if precio == 0:
-            estado_texto = "💰 Inscripción gratuita"
+            estado_texto = "💰 Inscripción gratuita ✅"
             boton = ""
 
         elif estado == "pagado":
-            estado_texto = "💰 Pago confirmado"
+            estado_texto = "💰 Pago confirmado ✅"
             boton = ""
 
         else:
-            estado_texto = "💰 Pago pendiente"
+            estado_texto = "💰 Pago pendiente 🟡"
             boton = f"""
+            <br><br>
             <a href="/pagar_mp/{i['numero_inscripcion']}">
-                <button>Pagar ahora</button>
+                <button style="
+                padding:12px 24px;
+                background:#ff9800;
+                color:white;
+                border:none;
+                border-radius:8px;
+                font-size:16px;
+                cursor:pointer;
+                ">
+                💳 Pagar ahora
+                </button>
             </a>
             """
 
         salida += f"""
-        <div style="margin-bottom:15px;padding:10px;border:1px solid #ddd;border-radius:8px;">
-            🏃 Inscripción confirmada<br>
-            🎽 {i['distancia']}<br>
-            {estado_texto}<br><br>
-            {boton}
+        <div style="
+        max-width:420px;
+        margin:60px auto;
+        background:white;
+        padding:25px;
+        border-radius:14px;
+        box-shadow:0 10px 25px rgba(0,0,0,.12);
+        text-align:center;
+        font-family:Arial;
+        ">
+
+        <h2>💳 Pago de inscripción</h2>
+
+        <h3>{nombre.upper()}</h3>
+
+        <p>🏃 Inscripción confirmada</p>
+        <p>🎽 {i['distancia']}</p>
+        <p>{estado_texto}</p>
+
+        {boton}
+
+        <br><br>
+
+        <button onclick="history.back()" style="
+        padding:10px 18px;
+        border:none;
+        border-radius:8px;
+        cursor:pointer;
+        ">
+        Cerrar
+        </button>
+
         </div>
         """
+
     return salida
+    
 @app.route("/evento/<int:evento_id>/verificar", methods=["POST"])
 def verificar_evento(evento_id):
 
