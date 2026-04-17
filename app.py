@@ -249,6 +249,113 @@ def webhook_mp():
             conn.close()
 
     return "ok", 200
+@app.route("/pagar_mp/<numero>")
+def pagar_mp(numero):
+
+    import mercadopago
+    from db import get_db_connection
+    import os
+
+    sdk = mercadopago.SDK(os.getenv("MP_ACCESS_TOKEN"))
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+    SELECT i.id, d.precio
+    FROM inscripciones i
+    JOIN distancias d ON d.id = i.distancia_id
+    WHERE i.numero_inscripcion = %s
+    """, (numero,))
+
+    ins = cursor.fetchone()
+
+    if not ins:
+        return "Inscripción no encontrada"
+
+    inscripcion_id = ins["id"]
+    precio = float(ins["precio"])
+
+    preference_data = {
+        "items": [
+            {
+                "title": f"Inscripción {numero}",
+                "quantity": 1,
+                "currency_id": "ARS",
+                "unit_price": precio
+            }
+        ],
+        "external_reference": str(inscripcion_id),
+        "notification_url": f"{os.getenv('BASE_URL')}/webhook_mp"
+    }
+
+    preference_response = sdk.preference().create(preference_data)
+    preference = preference_response["response"]
+
+    return f"""
+    <script>
+    window.location.href="{preference['init_point']}";
+    </script>
+    """
+@app.route("/evento/<int:evento_id>/pagar", methods=["GET", "POST"])
+def pagar_evento(evento_id):
+
+    from db import get_db_connection
+
+    if request.method == "GET":
+        return f"""
+        <h2>Pagar inscripción</h2>
+
+        <form method="POST">
+            DNI:<br>
+            <input type="text" name="dni" required><br><br>
+
+            <button>Buscar inscripción</button>
+        </form>
+        """
+
+    dni = request.form.get("dni")
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+    SELECT 
+        i.numero_inscripcion,
+        i.estado_pago,
+        d.nombre as distancia,
+        d.precio,
+        i.id as inscripcion_id
+    FROM inscripciones i
+    JOIN personas p ON p.id = i.persona_id
+    JOIN distancias d ON d.id = i.distancia_id
+    WHERE p.dni = %s
+    AND i.evento_id = %s
+    AND i.estado_pago != 'pagado'
+    """, (dni, evento_id))
+
+    inscripciones = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+
+    if not inscripciones:
+        return "<h3>No tenés inscripciones pendientes en este evento</h3>"
+
+    salida = "<h3>Seleccioná tu inscripción</h3>"
+
+    for i in inscripciones:
+        salida += f"""
+        <div style="margin-bottom:10px">
+            {i['distancia']} - ${i['precio']}
+            <br>
+            <a href="/pagar_mp/{i['numero_inscripcion']}">
+                <button>Pagar ahora</button>
+            </a>
+        </div>
+        """
+
+    return salida
 @app.route("/")
 def inicio():
     conn = get_db_connection()
