@@ -335,6 +335,8 @@ def pagar_evento(evento_id):
     """, (dni, evento_id))
 
     inscripciones = cursor.fetchall()
+    if not inscripciones:
+        return "<h2>No hay inscripciones pendientes para ese DNI</h2>"
 
     cursor.close()
     conn.close()
@@ -371,7 +373,56 @@ def pagar_evento(evento_id):
         </div>
         """
     return salida
-   
+@app.route("/evento/<int:evento_id>/verificar", methods=["POST"])
+def verificar_evento(evento_id):
+
+    dni = request.form.get("dni")
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+    SELECT
+        i.numero_inscripcion,
+        i.estado_pago,
+        d.nombre AS distancia,
+        d.precio
+    FROM inscripciones i
+    JOIN personas p ON p.id = i.persona_id
+    JOIN distancias d ON d.id = i.distancia_id
+    WHERE p.dni = %s
+    AND i.evento_id = %s
+    """, (dni, evento_id))
+
+    filas = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+
+    if not filas:
+        return "<h2>No encontramos inscripción con ese DNI</h2>"
+
+    salida = "<h2>Estado de inscripción</h2>"
+
+    for i in filas:
+
+        if float(i["precio"]) == 0:
+            estado = "✅ Inscripción gratuita confirmada"
+
+        elif i["estado_pago"] == "pagado":
+            estado = "✅ Pago confirmado"
+
+        else:
+            estado = "🟡 Pago pendiente"
+
+        salida += f"""
+        <div style='padding:15px;border:1px solid #ddd;margin:10px;border-radius:8px'>
+        🎽 {i['distancia']}<br>
+        📌 {estado}
+        </div>
+        """
+
+    return salida  
 @app.route("/")
 def inicio():
     conn = get_db_connection()
