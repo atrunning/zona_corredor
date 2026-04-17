@@ -338,8 +338,36 @@ def pagar_evento(evento_id):
 
     inscripciones = cursor.fetchall()
     if not inscripciones:
-        return "<h2>No hay inscripciones pendientes para ese DNI</h2>"
+        return """
+        <div style="
+        max-width:420px;
+        margin:80px auto;
+        background:white;
+        padding:30px;
+        border-radius:14px;
+        box-shadow:0 10px 25px rgba(0,0,0,.12);
+        text-align:center;
+        font-family:Arial;
+        ">
 
+        <h2>💳 Pago de inscripción</h2>
+
+        <p style="font-size:18px;">✅ No hay pagos pendientes</p>
+        <p>Tu inscripción ya está al día.</p>
+
+        <br>
+
+        <button onclick="history.back()" style="
+        padding:10px 18px;
+        border:none;
+        border-radius:8px;
+        cursor:pointer;
+        ">
+        Cerrar
+        </button>
+
+        </div>
+        """
     cursor.close()
     conn.close()
 
