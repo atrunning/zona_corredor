@@ -199,82 +199,136 @@ def mp_callback():
     conn.close()
 
     return "MP conectado correctamente 🎉"
+
 @app.route("/webhook_mp", methods=["POST"])
 def webhook_mp():
-    data = request.json
 
+    data = request.json
     print("WEBHOOK:", data)
 
-    if "data" in data and "id" in data["data"]:
-        payment_id = data["data"]["id"]
+    if not data or "data" not in data or "id" not in data["data"]:
+        return "ok", 200
 
-        # 🔥 CREAR SDK (ACÁ ESTABA EL ERROR)
-        sdk = mercadopago.SDK(os.getenv("MP_ACCESS_TOKEN"))
+    payment_id = data["data"]["id"]
 
-        payment = sdk.payment().get(payment_id)
-        info = payment["response"]
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
 
-        print("PAGO INFO:", info)
+    # Buscar inscripción y token correcto del organizador
+    cursor.execute("""
+    SELECT
+        i.id AS inscripcion_id,
+        o.access_token_mp
+    FROM pagos p
+    JOIN inscripciones i ON i.id = p.inscripcion_id
+    JOIN eventos e ON e.id = i.evento_id
+    JOIN organizadores o ON o.id = e.organizador_id
+    WHERE p.referencia_externa = %s
+    LIMIT 1
+    """, (str(payment_id),))
 
-        if info.get("status") == "approved":
-            inscripcion_id = info.get("external_reference")
-            comprobante = info.get("id")
-            monto = info.get("transaction_amount", 0)
-            precio = float(monto) / 1.03
-            comision = round(float(monto) - precio, 2)
+    fila = cursor.fetchone()
 
-            conn = get_db_connection()
-            cursor = conn.cursor()
+    # Si no encontró por payment_id, buscar luego por pagos pendientes
+    if not fila:
+        cursor.execute("""
+        SELECT
+            i.id AS inscripcion_id,
+            o.access_token_mp
+        FROM pagos p
+        JOIN inscripciones i ON i.id = p.inscripcion_id
+        JOIN eventos e ON e.id = i.evento_id
+        JOIN organizadores o ON o.id = e.organizador_id
+        WHERE p.estado = 'pendiente'
+        ORDER BY p.id DESC
+        LIMIT 1
+        """)
+        fila = cursor.fetchone()
 
-            cursor.execute("""
-            UPDATE pagos
-            SET estado = 'aprobado',
-                monto = %s,
-                referencia_externa = %s,
-                fecha_confirmacion = NOW(),
-                comision = %s
-            WHERE inscripcion_id = %s
-            AND estado = 'pendiente'
-            AND metodo = 'mercadopago'
-            """, (float(monto), comprobante, comision, inscripcion_id))
+    if not fila or not fila["access_token_mp"]:
+        cursor.close()
+        conn.close()
+        return "ok", 200
 
-            cursor.execute("""
-            UPDATE inscripciones
-            SET estado_pago = 'pagado'
-            WHERE id = %s
-            """, (inscripcion_id,))
+    inscripcion_id = fila["inscripcion_id"]
+    access_token = fila["access_token_mp"]
 
-            conn.commit()
-            cursor.close()
-            conn.close()
+    # Consultar pago con token correcto
+    sdk = mercadopago.SDK(access_token)
+
+    payment = sdk.payment().get(payment_id)
+    info = payment["response"]
+
+    print("PAGO INFO:", info)
+
+    if info.get("status") == "approved":
+
+        comprobante = info.get("id")
+        monto = float(info.get("transaction_amount", 0))
+
+        cursor.execute("""
+        UPDATE pagos
+        SET estado = 'aprobado',
+            monto = %s,
+            referencia_externa = %s,
+            fecha_confirmacion = NOW()
+        WHERE inscripcion_id = %s
+        AND estado = 'pendiente'
+        """, (monto, comprobante, inscripcion_id))
+
+        cursor.execute("""
+        UPDATE inscripciones
+        SET estado_pago = 'pagado'
+        WHERE id = %s
+        """, (inscripcion_id,))
+
+        conn.commit()
+
+    cursor.close()
+    conn.close()
 
     return "ok", 200
 @app.route("/pagar_mp/<numero>")
 def pagar_mp(numero):
 
     import mercadopago
-    from db import get_db_connection
     import os
-
-    sdk = mercadopago.SDK(os.getenv("MP_ACCESS_TOKEN"))
+    from db import get_db_connection
 
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
+    # Buscar inscripción + precio + token del organizador
     cursor.execute("""
-    SELECT i.id, d.precio
+    SELECT 
+        i.id,
+        i.numero_inscripcion,
+        d.precio,
+        o.access_token_mp
     FROM inscripciones i
     JOIN distancias d ON d.id = i.distancia_id
+    JOIN eventos e ON e.id = i.evento_id
+    JOIN organizadores o ON o.id = e.organizador_id
     WHERE i.numero_inscripcion = %s
     """, (numero,))
 
     ins = cursor.fetchone()
 
+    cursor.close()
+    conn.close()
+
     if not ins:
         return "Inscripción no encontrada"
 
+    if not ins["access_token_mp"]:
+        return "El organizador no tiene Mercado Pago conectado"
+
     inscripcion_id = ins["id"]
     precio = float(ins["precio"])
+    access_token = ins["access_token_mp"]
+
+    # SDK con token del organizador correcto
+    sdk = mercadopago.SDK(access_token)
 
     preference_data = {
         "items": [
@@ -286,17 +340,19 @@ def pagar_mp(numero):
             }
         ],
         "external_reference": str(inscripcion_id),
-        "notification_url": f"{os.getenv('BASE_URL')}/webhook_mp"
+        "back_urls": {
+            "success": f"{BASE_URL}/pago_exitoso",
+            "failure": f"{BASE_URL}/pago_error",
+            "pending": f"{BASE_URL}/pago_pendiente"
+        },
+        "auto_return": "approved",
+        "notification_url": f"{BASE_URL}/webhook_mp"
     }
 
     preference_response = sdk.preference().create(preference_data)
     preference = preference_response["response"]
 
-    return f"""
-    <script>
-    window.location.href="{preference['init_point']}";
-    </script>
-    """
+    return redirect(preference["init_point"])
 @app.route("/evento/<int:evento_id>/pagar", methods=["GET", "POST"])
 def pagar_evento(evento_id):
 
