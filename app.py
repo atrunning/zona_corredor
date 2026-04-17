@@ -322,7 +322,7 @@ def pagar_evento(evento_id):
     cursor.execute("""
     SELECT 
         p.nombre,
-        p.apellido           
+        p.apellido,           
         i.numero_inscripcion,
         i.estado_pago,
         d.nombre as distancia,
