@@ -339,23 +339,39 @@ def pagar_evento(evento_id):
     cursor.close()
     conn.close()
 
-    if not inscripciones:
-        return "<h3>No tenés inscripciones pendientes en este evento</h3>"
-
-    salida = "<h3>Seleccioná tu inscripción</h3>"
+    salida = "<h3>Resultado</h3>"
 
     for i in inscripciones:
-        salida += f"""
-        <div style="margin-bottom:10px">
-            {i['distancia']} - ${i['precio']}
-            <br>
+
+        estado = i["estado_pago"]
+        precio = float(i["precio"])
+
+        if precio == 0:
+            estado_texto = "💰 Inscripción gratuita"
+            boton = ""
+
+        elif estado == "pagado":
+            estado_texto = "💰 Pago confirmado"
+            boton = ""
+
+        else:
+            estado_texto = "💰 Pago pendiente"
+            boton = f"""
             <a href="/pagar_mp/{i['numero_inscripcion']}">
                 <button>Pagar ahora</button>
             </a>
+            """
+
+        salida += f"""
+        <div style="margin-bottom:15px;padding:10px;border:1px solid #ddd;border-radius:8px;">
+            🏃 Inscripción confirmada<br>
+            🎽 {i['distancia']}<br>
+            {estado_texto}<br><br>
+            {boton}
         </div>
         """
-
     return salida
+   
 @app.route("/")
 def inicio():
     conn = get_db_connection()
@@ -744,8 +760,31 @@ def ver_evento(evento_id):
     <div>👤 Organiza: {evento['organizador']}</div>
     </div>
 
-    <div style="text-align:center;margin-top:25px">
+    <div style="
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    gap:15px;
+    margin-top:25px;
+    flex-wrap:wrap;
+    ">
 
+    <!-- IZQUIERDA -->
+    <a href="/evento/{evento_id}/pagar">
+    <button style="
+    padding:10px 20px;
+    background:#607d8b;
+    color:white;
+    border:none;
+    border-radius:8px;
+    font-size:14px;
+    cursor:pointer;
+    ">
+    🔍 Verificar Inscripción
+    </button>
+    </a>
+
+    <!-- CENTRO -->
     <button onclick="abrirDistancias()" style="
     padding:12px 28px;
     background:#2e7d32;
@@ -758,10 +797,24 @@ def ver_evento(evento_id):
     INSCRIBIRME
     </button>
 
-    </div>
-    """    
-    descripcion = evento["descripcion"].replace("\n","<br>") if evento["descripcion"] else ""
+    <!-- DERECHA -->
+    <a href="/evento/{evento_id}/pagar">
+    <button style="
+    padding:10px 20px;
+    background:#ff9800;
+    color:white;
+    border:none;
+    border-radius:8px;
+    font-size:14px;
+    cursor:pointer;
+    ">
+    💳 Pagar ahora
+    </button>
+    </a>
 
+    </div>
+    """
+    descripcion = evento["descripcion"].replace("\n","<br>") if evento["descripcion"] else ""
     salida += f"""
     <div style="max-width:900px;margin:auto;margin-top:30px">
 
