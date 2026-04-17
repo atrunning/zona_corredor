@@ -383,6 +383,8 @@ def verificar_evento(evento_id):
 
     cursor.execute("""
     SELECT
+        p.nombre,
+        p.apellido,
         i.numero_inscripcion,
         i.estado_pago,
         d.nombre AS distancia,
@@ -392,35 +394,98 @@ def verificar_evento(evento_id):
     JOIN distancias d ON d.id = i.distancia_id
     WHERE p.dni = %s
     AND i.evento_id = %s
+    LIMIT 1
     """, (dni, evento_id))
 
-    filas = cursor.fetchall()
+    fila = cursor.fetchone()
 
     cursor.close()
     conn.close()
 
-    if not filas:
-        return "<h2>No encontramos inscripción con ese DNI</h2>"
-
-    salida = "<h2>Estado de inscripción</h2>"
-
-    for i in filas:
-
-        if float(i["precio"]) == 0:
-            estado = "✅ Inscripción gratuita confirmada"
-
-        elif i["estado_pago"] == "pagado":
-            estado = "✅ Pago confirmado"
-
-        else:
-            estado = "🟡 Pago pendiente"
-
-        salida += f"""
-        <div style='padding:15px;border:1px solid #ddd;margin:10px;border-radius:8px'>
-        🎽 {i['distancia']}<br>
-        📌 {estado}
+    if not fila:
+        return """
+        <div style="
+        max-width:420px;
+        margin:60px auto;
+        background:white;
+        padding:25px;
+        border-radius:14px;
+        box-shadow:0 10px 25px rgba(0,0,0,.12);
+        text-align:center;
+        font-family:Arial;
+        ">
+        <h2>🔍 Verificación</h2>
+        <p>❌ No encontramos inscripción con ese DNI</p>
+        <button onclick="history.back()">Cerrar</button>
         </div>
         """
+
+    nombre = f"{fila['nombre']} {fila['apellido']}"
+    distancia = fila["distancia"]
+    precio = float(fila["precio"])
+    estado_pago = fila["estado_pago"]
+
+    if precio == 0:
+        estado = "💰 Inscripción gratuita ✅"
+        boton = ""
+
+    elif estado_pago in ["pagado", "aprobado"]:
+        estado = "💰 Pago confirmado ✅"
+        boton = ""
+
+    else:
+        estado = "💰 Pago pendiente 🟡"
+        boton = f"""
+        <br><br>
+        <a href="/pagar_mp/{fila['numero_inscripcion']}">
+            <button style="
+            padding:12px 22px;
+            background:#ff9800;
+            color:white;
+            border:none;
+            border-radius:8px;
+            cursor:pointer;
+            ">
+            💳 Pagar ahora
+            </button>
+        </a>
+        """
+
+    return f"""
+    <div style="
+    max-width:420px;
+    margin:60px auto;
+    background:white;
+    padding:25px;
+    border-radius:14px;
+    box-shadow:0 10px 25px rgba(0,0,0,.12);
+    text-align:center;
+    font-family:Arial;
+    ">
+
+    <h2>🔍 Verificación</h2>
+
+    <h3>{nombre}</h3>
+
+    <p>🏃 Inscripción confirmada</p>
+    <p>🎽 {distancia}</p>
+    <p>{estado}</p>
+
+    {boton}
+
+    <br><br>
+
+    <button onclick="history.back()" style="
+    padding:10px 18px;
+    border:none;
+    border-radius:8px;
+    cursor:pointer;
+    ">
+    Cerrar
+    </button>
+
+    </div>
+    """
 
     return salida  
 @app.route("/")
