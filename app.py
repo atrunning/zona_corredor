@@ -199,7 +199,41 @@ def mp_callback():
     conn.close()
 
     return "MP conectado correctamente 🎉"
+@app.route("/pago_exitoso")
+def pago_exitoso():
+    return """
+    <div style="
+    max-width:420px;
+    margin:60px auto;
+    background:white;
+    padding:25px;
+    border-radius:14px;
+    box-shadow:0 10px 25px rgba(0,0,0,.12);
+    text-align:center;
+    font-family:Arial;
+    ">
+    <h2>✅ Pago exitoso</h2>
+    <p>Tu inscripción fue abonada correctamente.</p>
+    <br>
+    <a href="/">
+        <button style="
+        padding:10px 18px;
+        border:none;
+        border-radius:8px;
+        cursor:pointer;
+        ">
+        Volver al inicio
+        </button>
+    </a>
+    </div>
+    """
+@app.route("/pago_error")
+def pago_error():
+    return "<h2>❌ El pago fue cancelado o rechazado</h2>"
 
+@app.route("/pago_pendiente")
+def pago_pendiente():
+    return "<h2>🟡 El pago quedó pendiente</h2>"
 @app.route("/webhook_mp", methods=["POST"])
 def webhook_mp():
 
