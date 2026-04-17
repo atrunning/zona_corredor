@@ -558,7 +558,7 @@ def verificar_evento(evento_id):
     </div>
     """
 
-    return salida  
+     
 @app.route("/")
 def inicio():
     conn = get_db_connection()
@@ -849,7 +849,33 @@ def ver_evento(evento_id):
     """, (evento_id,))
 
     evento = cursor.fetchone()
-    
+
+    cursor.execute("""
+    SELECT access_token_mp
+    FROM organizadores
+    WHERE id = %s
+    """, (evento["organizador_id"],))
+
+    mp = cursor.fetchone()
+    tiene_mp = bool(mp and mp["access_token_mp"])
+    descripcion = evento["descripcion"].replace("\n", "<br>") if evento["descripcion"] else ""
+
+    boton_pagar = ""
+
+    if tiene_mp:
+        boton_pagar = """
+        <button onclick="abrirPagar()" style="
+        padding:10px 20px;
+        background:#ff9800;
+        color:white;
+        border:none;
+        border-radius:8px;
+        font-size:14px;
+        cursor:pointer;
+        ">
+        💳 Pagar ahora
+        </button>
+        """
 
     imagen = evento["imagen"] if evento["imagen"] else "evento.jpg"
 
@@ -934,6 +960,7 @@ def ver_evento(evento_id):
     </div>
     """
 
+
     salida += f"""
     <h1 style="text-align:center;margin-top:20px">
     {evento['nombre']}
@@ -945,16 +972,10 @@ def ver_evento(evento_id):
     <div>📍 {evento.get('direccion') or evento['lugar']}</div>
     <div>⏰ {evento['hora']}</div>
     <div>👤 Organiza: {evento['organizador']}</div>
+
     </div>
 
-    <div style="
-    display:flex;
-    justify-content:center;
-    align-items:center;
-    gap:15px;
-    margin-top:25px;
-    flex-wrap:wrap;
-    ">
+    <div style="text-align:center;margin-top:25px; display:flex; justify-content:center; gap:15px; flex-wrap:wrap;">
 
     <!-- IZQUIERDA -->
     <button onclick="abrirVerificar()" style="
@@ -983,22 +1004,10 @@ def ver_evento(evento_id):
     </button>
 
     <!-- DERECHA -->
-    <button onclick="abrirPagar()" style="
-    padding:10px 20px;
-    background:#ff9800;
-    color:white;
-    border:none;
-    border-radius:8px;
-    font-size:14px;
-    cursor:pointer;
-    ">
-    💳 Pagar ahora
-    </button>
+    {boton_pagar}
 
     </div>
-    """
-    descripcion = evento["descripcion"].replace("\n","<br>") if evento["descripcion"] else ""
-    salida += f"""
+
     <div style="max-width:900px;margin:auto;margin-top:30px">
 
     <h2>Información del evento</h2>
@@ -1017,6 +1026,9 @@ def ver_evento(evento_id):
     </div>
     </div>
     """
+
+    
+    
     salida += f"""
 
     <!-- MODAL VERIFICAR -->
