@@ -22,6 +22,16 @@ from mail import enviar_confirmacion, prueba_mail
 prueba_mail()
 BASE_URL = os.getenv("BASE_URL", "http://localhost:5000")
 print("🔥 BASE_URL EN PRODUCCION:", BASE_URL)
+import qrcode
+import base64
+from io import BytesIO
+def generar_qr_base64(texto):
+    img = qrcode.make(texto)
+
+    buffer = BytesIO()
+    img.save(buffer, format="PNG")
+
+    return base64.b64encode(buffer.getvalue()).decode()
 
 def slugify(texto):
     texto = texto.lower()
@@ -2779,7 +2789,7 @@ def test_confirmacion():
     return "confirmacion probada"
 @app.route("/preview-mail")
 def preview_mail():
-
+    qr = generar_qr_base64(numero)
     html = f"""
     <div style="font-family:Arial; max-width:700px; margin:auto; background:#ffffff; border:1px solid #ddd; border-radius:12px; overflow:hidden;">
 
@@ -2799,8 +2809,8 @@ def preview_mail():
             <p><b>DNI:</b> 23456789</p>
             <p><b>Distancia:</b> 10K</p>
 
-            <div style="margin:30px auto; width:220px; height:220px; border:2px dashed #999; display:flex; align-items:center; justify-content:center;">
-                QR 5-000154
+            <div style="margin:30px auto;">
+                <img src="data:image/png;base64,{qr}" width="220">
             </div>
 
             <p style="font-size:22px;"><b>N° 5-000154</b></p>
