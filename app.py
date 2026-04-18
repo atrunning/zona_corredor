@@ -2777,7 +2777,39 @@ def test_confirmacion():
     )
 
     return "confirmacion probada"
-    
+@app.route("/preview-mail")
+def preview_mail():
+
+    html = f"""
+    <div style="font-family:Arial; max-width:700px; margin:auto; background:#ffffff; border:1px solid #ddd; border-radius:12px; overflow:hidden;">
+
+        <img src="https://via.placeholder.com/700x300.png?text=10K+Berazategui"
+             style="width:100%; max-height:320px; object-fit:cover;">
+
+        <div style="padding:30px; text-align:center;">
+
+            <h1 style="color:#2e7d32;">✅ INSCRIPCIÓN CONFIRMADA</h1>
+
+            <h2>10K Berazategui</h2>
+            <p>12/07/2026</p>
+
+            <hr>
+
+            <p><b>Corredor:</b> Alejandro Torres</p>
+            <p><b>DNI:</b> 23456789</p>
+            <p><b>Distancia:</b> 10K</p>
+
+            <div style="margin:30px auto; width:220px; height:220px; border:2px dashed #999; display:flex; align-items:center; justify-content:center;">
+                QR 5-000154
+            </div>
+
+            <p style="font-size:22px;"><b>N° 5-000154</b></p>
+
+        </div>
+    </div>
+    """
+
+    return html    
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
