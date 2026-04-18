@@ -2789,7 +2789,7 @@ def test_confirmacion():
     return "confirmacion probada"
 @app.route("/preview-mail")
 def preview_mail():
-    qr = generar_qr_base64(numero)
+    qr = generar_qr_base64("5-000154")
     html = f"""
     <div style="font-family:Arial; max-width:700px; margin:auto; background:#ffffff; border:1px solid #ddd; border-radius:12px; overflow:hidden;">
 
