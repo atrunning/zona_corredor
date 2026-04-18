@@ -18,7 +18,8 @@ from flask import request
 from decimal import Decimal
 
 import os
-
+from mail import enviar_confirmacion, prueba_mail
+prueba_mail()
 BASE_URL = os.getenv("BASE_URL", "http://localhost:5000")
 print("🔥 BASE_URL EN PRODUCCION:", BASE_URL)
 
@@ -317,6 +318,26 @@ def webhook_mp():
         """, (inscripcion_id,))
 
         conn.commit()
+        
+        cursor.execute("""
+        SELECT
+            p.email,
+            p.nombre,
+            e.nombre AS evento
+        FROM inscripciones i
+        JOIN personas p ON p.id = i.persona_id
+        JOIN eventos e ON e.id = i.evento_id
+        WHERE i.id = %s
+        """, (inscripcion_id,))
+
+        datos_mail = cursor.fetchone()
+
+        if datos_mail:
+            enviar_confirmacion(
+                datos_mail["email"],
+                datos_mail["nombre"],
+                datos_mail["evento"]
+            )
 
     cursor.close()
     conn.close()
@@ -2737,7 +2758,27 @@ def toggle_publicado(evento_id):
     window.location.href="/evento/{evento_id}/panel"
     </script>
     """
+@app.route("/test-mail")
+def test_mail():
+    prueba_mail()
+    return "mail ok"
+@app.route("/test-confirmacion")
+def test_confirmacion():
 
+    enviar_confirmacion(
+        "tuemail@gmail.com",
+        "Alejandro Torres",
+        "23456789",
+        "10K Berazategui",
+        "12/07/2026",
+        "10K",
+        "5-00000154",
+        "https://via.placeholder.com/700x300.png?text=10K+Berazategui"
+    )
+
+    return "confirmacion probada"
+    )
+    return "confirmacion probada"
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
