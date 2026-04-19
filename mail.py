@@ -24,15 +24,25 @@ def enviar_mail(destino, asunto, html):
 
         msg.attach(MIMEText(html, "html", "utf-8"))
 
-        
-
         server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10)
+        print("CONECTO")
+
         server.ehlo()
+        print("EHLO OK")
+
         server.starttls()
+        print("TLS OK")
+
         server.ehlo()
+
         server.login(SMTP_USER, SMTP_PASS)
+        print("LOGIN OK")
+
         server.send_message(msg)
+        print("SEND OK")
+
         server.quit()
+        print("QUIT OK")
 
         print("MAIL ENVIADO A:", destino)
         return True
