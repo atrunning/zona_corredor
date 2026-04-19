@@ -2,11 +2,11 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-SMTP_HOST = "c1571216.ferozo.com"
-SMTP_PORT = 465
+SMTP_HOST = "smtp-relay.brevo.com"
+SMTP_PORT = 587
 
-SMTP_USER = "no-reply@atrunning.com.ar"
-SMTP_PASS = "q23@swYSPp"
+SMTP_USER = "a8939b001@smtp-brevo.com"
+SMTP_PASS = "N5nK1L9mZDtAFGP2"
 
 
 def prueba_mail():
@@ -24,12 +24,10 @@ def enviar_mail(destino, asunto, html):
 
         msg.attach(MIMEText(html, "html", "utf-8"))
 
-        server = smtplib.SMTP_SSL(
-            SMTP_HOST,
-            SMTP_PORT,
-            timeout=20
-        )
+        
 
+        server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20)
+        server.starttls()
         server.login(SMTP_USER, SMTP_PASS)
         server.send_message(msg)
         server.quit()
