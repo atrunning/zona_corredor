@@ -30,7 +30,7 @@ def enviar_mail(destino, asunto, html):
         payload = {
             "sender": {
                 "name": "Zona Corredor",
-                "email": "inscripciones@zonacorredor.com.ar"
+                "email": "zonacorredor@gmail.com"
             },
             "to": [
                 {
