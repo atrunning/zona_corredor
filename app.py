@@ -334,14 +334,14 @@ def webhook_mp():
             p.email,
             p.nombre,
             p.dni,
-            i.numero,
+            i.codigo AS numero,
             c.nombre AS distancia,
             e.nombre AS evento,
             e.fecha,
             e.imagen
         FROM inscripciones i
         JOIN personas p ON p.id = i.persona_id
-        JOIN categorias c ON c.id = i.categoria_id
+        JOIN distancias c ON c.id = i.distancia_id
         JOIN eventos e ON e.id = i.evento_id
         WHERE i.id = %s
         """, (inscripcion_id,))
