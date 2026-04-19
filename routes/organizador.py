@@ -1607,16 +1607,15 @@ def pantalla_pago(numero):
         WHERE inscripcion_id = (
             SELECT id FROM inscripciones WHERE numero_inscripcion=%s
         )
-        AND estado = 'aprobado'
+        AND estado IN ('pagado','aprobado')
         """, (numero,))
 
         existe_pago = cursor.fetchone()
 
         if existe_pago:
-            return "<h2>⚠️ Esta inscripción ya tiene un pago aprobado</h2>"
-        if estado == "pagado":
-            estado = "aprobado"
-
+            return "<h2>⚠️ Esta inscripción ya tiene un pago Confirmado</h2>"
+        if estado == "aprobado":
+            estado = "pagado"
         cursor.execute("""
         INSERT INTO pagos (inscripcion_id, monto, metodo, estado, fecha_creacion)
         VALUES (%s,%s,%s,%s,NOW())
@@ -1692,8 +1691,8 @@ def editar_pago(pago_id):
         estado = request.form["estado"]
         metodo = request.form["metodo"]
 
-        if estado == "pagado":
-            estado = "aprobado"
+        if estado == "aprobado":
+            estado = "pagado"
 
         cursor.execute("""
         UPDATE pagos
@@ -1722,7 +1721,7 @@ def editar_pago(pago_id):
     Estado<br>
     <select name="estado">
         <option value="pendiente" {"selected" if pago['estado']=="pendiente" else ""}>Pendiente</option>
-        <option value="pagado" {"selected" if pago['estado']=="aprobado" else ""}>Pagado</option>
+        <option value="pagado" {"selected" if pago['estado'] in ['pagado','aprobado'] else ""}>Pagado</option>
     </select><br><br>
 
     Método<br>
@@ -2180,7 +2179,7 @@ def exportar_excel(evento_id):
             SUM(monto) AS monto_total,
             MAX(fecha_confirmacion) AS fecha_pago
         FROM pagos
-        WHERE estado = 'aprobado'
+        WHERE estado IN ('pagado','aprobado')
         GROUP BY inscripcion_id
     ) pay ON pay.inscripcion_id = i.id
     JOIN eventos e ON e.id = i.evento_id

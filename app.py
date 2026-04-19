@@ -333,9 +333,15 @@ def webhook_mp():
         SELECT
             p.email,
             p.nombre,
-            e.nombre AS evento
+            p.dni,
+            i.numero,
+            c.nombre AS distancia,
+            e.nombre AS evento,
+            e.fecha,
+            e.imagen
         FROM inscripciones i
         JOIN personas p ON p.id = i.persona_id
+        JOIN categorias c ON c.id = i.categoria_id
         JOIN eventos e ON e.id = i.evento_id
         WHERE i.id = %s
         """, (inscripcion_id,))
@@ -343,10 +349,19 @@ def webhook_mp():
         datos_mail = cursor.fetchone()
 
         if datos_mail:
+
+            imagen_evento = datos_mail["imagen"] if datos_mail["imagen"] else "evento.jpg"
+            fecha_evento = datos_mail["fecha"].strftime("%d/%m/%Y")
+
             enviar_confirmacion(
                 datos_mail["email"],
                 datos_mail["nombre"],
-                datos_mail["evento"]
+                datos_mail["dni"],
+                datos_mail["evento"],
+                fecha_evento,
+                datos_mail["distancia"],
+                datos_mail["numero"],
+                f"{BASE_URL}/static/eventos/{imagen_evento}"
             )
 
     cursor.close()
@@ -394,6 +409,7 @@ def pagar_mp(numero):
 
     # SDK con token del organizador correcto
     sdk = mercadopago.SDK(access_token)
+    
 
     preference_data = {
         "items": [
@@ -1347,21 +1363,36 @@ def ver_evento(evento_id):
         disponibles = max(d["cupo"] - inscriptos, 0)
 
         if inscripcion_abierta and disponibles > 0:
-                               
 
             boton = f"""
-            <a href="/evento/{evento_id}/inscribirse?distancia={d['id']}">
+            <form method="GET" action="/evento/{evento_id}/inscribirse" style="margin:0;">
+                <input type="hidden" name="distancia" value="{d['id']}">
+
+                <input type="text"
+                    name="cupon"
+                    placeholder="Cupón"
+                    style="
+                    padding:8px;
+                    width:110px;
+                    border:1px solid #ccc;
+                    border-radius:5px;
+                    margin-bottom:6px;
+                    text-transform:uppercase;
+                    ">
+
+                <br>
+
                 <button style="
-                padding:10px 16px;
-                background:#2e7d32;
-                color:white;
-                border:none;
-                border-radius:5px;
-                cursor:pointer;
+                    padding:10px 16px;
+                    background:#2e7d32;
+                    color:white;
+                    border:none;
+                    border-radius:5px;
+                    cursor:pointer;
                 ">
-                Inscribirme
+                    Inscribirme
                 </button>
-            </a>
+            </form>
             """
 
         else:
@@ -1499,6 +1530,8 @@ def reporte_remeras(evento_id):
 @app.route("/evento/<int:evento_id>/inscribirse", methods=["GET", "POST"])
 def inscribirse(evento_id):
     distancia_id = request.args.get("distancia")
+    cupon = request.args.get("cupon", "").strip().upper()
+    descuento_cupon = 0
 
     if not distancia_id:
         return "Distancia no especificada"
@@ -1546,8 +1579,9 @@ def inscribirse(evento_id):
         </div>
 
         <form method="POST" style="display:flex;flex-direction:column;gap:15px">
-
         <input type="hidden" name="distancia_id" value="{distancia_id}">
+
+        <input type="hidden" name="cupon" value="{cupon}">
 
         <input type="text" name="dni" placeholder="Ingresá tu DNI"
         maxlength="8"
@@ -1656,6 +1690,7 @@ def inscribirse(evento_id):
         <input type="hidden" name="distancia_id" value="{distancia_id}">
         <input type="hidden" name="accion" value="confirmar">
         <input type="hidden" name="persona_id" value="{persona['id']}">
+        <input type="hidden" name="cupon" value="{cupon}">
 
         <h3>Identificación</h3>
 
@@ -1767,6 +1802,8 @@ def inscribirse(evento_id):
     # --------------------------------------
     
     if accion == "confirmar":
+
+        cupon = request.form.get("cupon", "").strip().upper()
 
         distancia_id = request.form.get("distancia_id")
 
@@ -2174,6 +2211,78 @@ def inscribirse(evento_id):
         dist = cursor.fetchone()
         precio = dist["precio"]
         es_gratis = dist["es_gratis"]
+
+        descuento_cupon = 0
+
+        if cupon:
+
+            cursor.execute("""
+            SELECT descuento
+            FROM cupones
+            WHERE evento_id = %s
+            AND clave = %s
+            AND activo = 1
+            AND CURDATE() BETWEEN fecha_desde AND fecha_hasta
+            LIMIT 1
+            """, (evento_id, cupon))
+
+            cup = cursor.fetchone()
+
+            if cup:
+                descuento_cupon = int(cup["descuento"])
+                precio = float(precio) * (100 - descuento_cupon) / 100
+
+        if es_gratis:
+
+                    cursor.execute("""
+                    UPDATE inscripciones
+                    SET estado_pago = 'gratis'
+                    WHERE id = %s
+                    """, (inscripcion_id,))
+
+                    conn.commit()
+
+                    try:
+                        cursor.execute(
+                            "SELECT imagen, fecha FROM eventos WHERE id=%s",
+                            (evento_id,)
+                        )
+
+                        ev = cursor.fetchone()
+
+                        imagen_evento = ev["imagen"] if ev["imagen"] else "evento.jpg"
+                        fecha_evento = ev["fecha"].strftime("%d/%m/%Y")
+
+                        enviar_confirmacion(
+                            email,
+                            nombre + " " + apellido,
+                            dni,
+                            nombre_evento,
+                            fecha_evento,
+                            "Inscripción gratuita",
+                            numero,
+                            f"{BASE_URL}/static/eventos/{imagen_evento}"
+                        )
+
+                    except Exception as e:
+                        print("MAIL GRATIS ERROR:", e)
+
+                    cursor.close()
+                    conn.close()
+
+                    return f"""
+                    <div style='max-width:420px;margin:60px auto;
+                    background:white;padding:30px;border-radius:14px;
+                    text-align:center;font-family:Arial;
+                    box-shadow:0 10px 25px rgba(0,0,0,.12);'>
+
+                    <h2>✅ Inscripción confirmada</h2>
+                    <p>Tu inscripción gratuita fue registrada.</p>
+                    <p><b>Número:</b> {numero}</p>
+
+                    </div>
+                    """        
+        
         cursor.execute("""
         INSERT INTO pagos (
             inscripcion_id,
@@ -2191,61 +2300,11 @@ def inscribirse(evento_id):
             "pendiente",
             str(inscripcion_id)
         ))
+        
 
         conn.commit()
 
-    if es_gratis:
-
-        cursor.execute("""
-        UPDATE inscripciones
-        SET estado_pago = 'gratis'
-        WHERE id = %s
-        """, (inscripcion_id,))
-
-        conn.commit()
-
-        try:
-            cursor.execute("SELECT imagen, fecha FROM eventos WHERE id=%s", (evento_id,))
-            ev = cursor.fetchone()
-
-            imagen_evento = ev["imagen"] if ev["imagen"] else "evento.jpg"
-            fecha_evento = ev["fecha"].strftime("%d/%m/%Y")
-
-            enviar_confirmacion(
-                email,
-                nombre + " " + apellido,
-                dni,
-                nombre_evento,
-                fecha_evento,
-                "Inscripción gratuita",
-                numero,
-                f"{BASE_URL}/static/eventos/{imagen_evento}"
-            )
-        except Exception as e:
-            print("MAIL GRATIS ERROR:", e)
-
-        cursor.close()
-        conn.close()
-
-        return f"""
-        <div style="max-width:420px;margin:60px auto;
-        background:white;padding:30px;border-radius:14px;
-        text-align:center;font-family:Arial;
-        box-shadow:0 10px 25px rgba(0,0,0,.12);">
-
-        <h2>✅ Inscripción confirmada</h2>
-        <p>Tu inscripción gratuita fue registrada.</p>
-        <p><b>Número:</b> {numero}</p>
-        <p>Te enviamos el comprobante por email.</p>
-
-        <a href="/">
-            <button style="padding:10px 18px;">
-            Volver
-            </button>
-        </a>
-
-        </div>
-        """
+        
 
     # 🔥 OBTENER TOKEN DEL ORGANIZADOR
     cursor.execute("""
@@ -2263,6 +2322,27 @@ def inscribirse(evento_id):
         return "Error: el organizador no tiene MercadoPago conectado"
 
     access_token = organizador["access_token_mp"]
+    
+    mensaje_descuento = ""
+
+    if descuento_cupon > 0:
+        mensaje_descuento = f"""
+        <div style="
+        max-width:420px;
+        margin:20px auto;
+        padding:15px;
+        background:#e8f5e9;
+        border:1px solid #81c784;
+        border-radius:10px;
+        text-align:center;
+        font-family:Arial;
+        color:#2e7d32;
+        font-weight:bold;
+        ">
+        🎉 Cupón aplicado: {descuento_cupon}% OFF
+        </div>
+        """
+    
 
     sdk = mercadopago.SDK(access_token)
 
@@ -2288,7 +2368,44 @@ def inscribirse(evento_id):
     cursor.close()
     conn.close()
 
-    return redirect(preference["response"]["init_point"])
+    link_pago = preference["response"]["init_point"]
+
+    return f"""
+    {mensaje_descuento}
+
+    <div style="
+    max-width:420px;
+    margin:40px auto;
+    background:white;
+    padding:30px;
+    border-radius:14px;
+    text-align:center;
+    font-family:Arial;
+    box-shadow:0 10px 25px rgba(0,0,0,.12);
+    ">
+
+    <h2>💳 Finalizar pago</h2>
+
+    <p>Total a pagar:</p>
+
+    <h1>${format(int(precio), ",").replace(",", ".")}</h1>
+
+    <a href="{link_pago}">
+        <button style="
+        padding:12px 24px;
+        background:#009ee3;
+        color:white;
+        border:none;
+        border-radius:8px;
+        font-size:16px;
+        cursor:pointer;
+        ">
+        Ir a Mercado Pago
+        </button>
+    </a>
+
+    </div>
+    """
 
         
                 
@@ -2375,9 +2492,17 @@ def panel_evento(evento_id):
     # -------------------
     cursor.execute("""
     SELECT 
-        SUM(CASE WHEN p.estado = 'aprobado' THEN p.monto ELSE 0 END) as cobrado,
+        SUM(CASE 
+            WHEN p.estado IN ('aprobado','pagado') 
+            AND p.monto > 0
+            THEN p.monto 
+            ELSE 0 
+        END) as cobrado,
+
         SUM(CASE WHEN p.estado = 'pendiente' THEN p.monto ELSE 0 END) as pendiente,
+
         SUM(CASE WHEN p.estado = 'rechazado' THEN p.monto ELSE 0 END) as rechazado
+
     FROM pagos p
     JOIN inscripciones i ON p.inscripcion_id = i.id
     WHERE i.evento_id = %s
