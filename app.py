@@ -334,7 +334,7 @@ def webhook_mp():
             p.email,
             p.nombre,
             p.dni,
-            i.codigo AS numero,
+            i.numero_inscripcion AS numero,
             c.nombre AS distancia,
             e.nombre AS evento,
             e.fecha,
