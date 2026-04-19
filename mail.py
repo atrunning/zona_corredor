@@ -2,28 +2,39 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-SMTP_HOST = "mail.zonacorredor.com.ar"
-SMTP_PORT = 587
+SMTP_HOST = "c1571216.ferozo.com"
+SMTP_PORT = 465
 
-SMTP_USER = "inscripciones@zonacorredor.com.ar"
-SMTP_PASS = "TU_PASSWORD"
+SMTP_USER = "no-reply@atrunning.com.ar"
+SMTP_PASS = "q23@swYSPp"
+
+
+def prueba_mail():
+    print("mail.py funcionando")
 
 
 def enviar_mail(destino, asunto, html):
     try:
-        msg = MIMEMultipart()
+        print("INICIANDO SMTP")
+
+        msg = MIMEMultipart("alternative")
         msg["From"] = SMTP_USER
         msg["To"] = destino
         msg["Subject"] = asunto
 
-        msg.attach(MIMEText(html, "html"))
+        msg.attach(MIMEText(html, "html", "utf-8"))
 
-        server = smtplib.SMTP(SMTP_HOST, SMTP_PORT)
-        server.starttls()
+        server = smtplib.SMTP_SSL(
+            SMTP_HOST,
+            SMTP_PORT,
+            timeout=20
+        )
+
         server.login(SMTP_USER, SMTP_PASS)
         server.send_message(msg)
         server.quit()
 
+        print("MAIL ENVIADO A:", destino)
         return True
 
     except Exception as e:
@@ -31,73 +42,119 @@ def enviar_mail(destino, asunto, html):
         return False
 
 
-def prueba_mail():
-    print("mail.py funcionando")
-
-
-def enviar_confirmacion(destino, nombre, dni, carrera, fecha, distancia, numero, imagen):
+def enviar_confirmacion(
+    destino,
+    nombre,
+    dni,
+    carrera,
+    fecha,
+    distancia,
+    numero,
+    imagen
+):
 
     html = f"""
-    <div style="font-family:Arial; max-width:700px; margin:auto; background:#ffffff; border:1px solid #ddd; border-radius:12px; overflow:hidden;">
+    <html>
+    <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    </head>
 
-        <img src="{imagen}" style="width:100%; max-height:320px; object-fit:cover;">
+    <body style="margin:0; padding:8px; background:#f4f4f4;">
 
-        <div style="padding:30px; text-align:center;">
+    <div style="
+        font-family:Arial,sans-serif;
+        max-width:280px;
+        margin:auto;
+        background:#ffffff;
+        border:1px solid #ddd;
+        border-radius:10px;
+        overflow:hidden;
+    ">
 
-            <h1 style="color:#2e7d32; margin-bottom:10px;">
-                ✅ INSCRIPCIÓN CONFIRMADA
+        <img src="{imagen}"
+             style="width:100%; height:100px; object-fit:cover; display:block;">
+
+        <div style="padding:10px; text-align:center;">
+
+            <h1 style="
+                margin:0;
+                font-size:10px;
+                color:#2e7d32;
+                line-height:1.2;
+            ">
+                ✅ CONFIRMADA
             </h1>
 
-            <h2 style="margin:0; color:#222;">
+            <h2 style="
+                margin:6px 0 3px 0;
+                font-size:13px;
+                color:#222;
+            ">
                 {carrera}
             </h2>
 
-            <p style="font-size:18px; color:#555;">
+            <p style="
+                margin:0;
+                font-size:11px;
+                color:#666;
+            ">
                 {fecha}
             </p>
 
-            <hr style="margin:25px 0;">
+            <hr style="margin:10px 0;">
 
-            <p style="font-size:18px;"><b>Corredor:</b> {nombre}</p>
-            <p style="font-size:18px;"><b>DNI:</b> {dni}</p>
-            <p style="font-size:18px;"><b>Distancia:</b> {distancia}</p>
+            <p style="margin:4px 0; font-size:12px;">
+                <b>{nombre}</b>
+            </p>
+
+            <p style="margin:4px 0; font-size:11px;">
+                DNI {dni}
+            </p>
+
+            <p style="margin:4px 0; font-size:11px;">
+                {distancia}
+            </p>
 
             <div style="
-                margin:30px auto;
-                width:220px;
-                height:220px;
-                border:2px dashed #999;
-                display:flex;
-                align-items:center;
-                justify-content:center;
-                color:#666;
-                font-size:14px;
+                margin:12px auto;
+                padding:8px;
+                border:1px solid #ddd;
+                border-radius:8px;
+                background:#f8f8f8;
             ">
-                QR {numero}
+
+                <div style="
+                    font-size:10px;
+                    color:#666;
+                ">
+                    Número
+                </div>
+
+                <div style="
+                    font-size:18px;
+                    font-weight:bold;
+                    color:#1565c0;
+                    margin-top:4px;
+                ">
+                    {numero}
+                </div>
+
             </div>
 
-            <p style="font-size:22px; font-weight:bold; color:#1976d2;">
-                N° {numero}
-            </p>
-
-            <p style="margin-top:25px; color:#666;">
-                Presentá este comprobante en la acreditación.
-            </p>
-
-            <p style="margin-top:30px; font-size:13px; color:#999;">
-                Powered by Zona Corredor
+            <p style="
+                font-size:10px;
+                color:#555;
+                margin:6px 0;
+            ">
+                Presentar en acreditación
             </p>
 
         </div>
     </div>
-    """
 
-    if SMTP_PASS == "TU_PASSWORD":
-        print("MAIL A:", destino)
-        print("Nombre:", nombre)
-        print("DNI:", dni)
-        print("Carrera:", carrera)
-        return True
+    </body>
+    </html>
+    """
 
     return enviar_mail(
         destino,

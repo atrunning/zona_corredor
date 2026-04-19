@@ -1322,6 +1322,8 @@ def ver_evento(evento_id):
 
         hoy = date.today()
 
+        remera = ""
+
         if d["es_gratis"]:
             precio = "Gratis"
         else:
@@ -1345,63 +1347,62 @@ def ver_evento(evento_id):
         disponibles = max(d["cupo"] - inscriptos, 0)
 
         if inscripcion_abierta and disponibles > 0:
-                      
-            if inscripcion_abierta and disponibles > 0:
+                               
 
-                boton = f"""
-                <a href="/evento/{evento_id}/inscribirse?distancia={d['id']}">
-                    <button style="
-                    padding:10px 16px;
-                    background:#2e7d32;
-                    color:white;
-                    border:none;
-                    border-radius:5px;
-                    cursor:pointer;
-                    ">
-                    Inscribirme
-                    </button>
-                </a>
-                """
-
-            else:
-
-                boton = """
+            boton = f"""
+            <a href="/evento/{evento_id}/inscribirse?distancia={d['id']}">
                 <button style="
                 padding:10px 16px;
-                background:#ccc;
-                color:#666;
+                background:#2e7d32;
+                color:white;
                 border:none;
                 border-radius:5px;
-                cursor:not-allowed;
-                opacity:0.6;
+                cursor:pointer;
                 ">
-                Cupo completo
+                Inscribirme
                 </button>
-                """
-            salida += f"""
-            <div style="
-                display:flex;
-                justify-content:space-between;
-                align-items:center;
-                padding:15px;
-                margin-bottom:12px;
-                border:1px solid #ddd;
-                border-radius:6px;
-                background:#fafafa;
-            ">
-
-                <div>
-                    <b>{d['nombre']}</b><br>
-                    Precio: {precio}<br>
-                    {remera}
-                </div>
-
-                <div>
-                    {boton}
-                </div>
-
-            </div>
+            </a>
             """
+
+        else:
+
+            boton = """
+            <button style="
+            padding:10px 16px;
+            background:#ccc;
+            color:#666;
+            border:none;
+            border-radius:5px;
+            cursor:not-allowed;
+            opacity:0.6;
+            ">
+            Cupo completo
+            </button>
+            """
+        salida += f"""
+        <div style="
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+            padding:15px;
+            margin-bottom:12px;
+            border:1px solid #ddd;
+            border-radius:6px;
+            background:#fafafa;
+        ">
+
+            <div>
+                <b>{d['nombre']}</b><br>
+                Precio: {precio}<br>
+                {remera}
+            </div>
+
+            <div>
+                {boton}
+            </div>
+
+        </div>
+        """
     cursor.close()
     conn.close()
     
@@ -2165,13 +2166,14 @@ def inscribirse(evento_id):
 
         # 🔥 obtener precio
         cursor.execute("""
-        SELECT precio
+        SELECT precio, es_gratis
         FROM distancias
         WHERE id = %s
         """, (distancia_id,))
 
         dist = cursor.fetchone()
         precio = dist["precio"]
+        es_gratis = dist["es_gratis"]
         cursor.execute("""
         INSERT INTO pagos (
             inscripcion_id,
@@ -2192,54 +2194,92 @@ def inscribirse(evento_id):
 
         conn.commit()
 
-        # 🔥 OBTENER TOKEN DEL ORGANIZADOR
+    if es_gratis:
+
         cursor.execute("""
-        SELECT o.access_token_mp
-        FROM eventos e
-        JOIN organizadores o ON e.organizador_id = o.id
-        WHERE e.id = %s
-        """, (evento_id,))
+        UPDATE inscripciones
+        SET estado_pago = 'gratis'
+        WHERE id = %s
+        """, (inscripcion_id,))
 
-        organizador = cursor.fetchone()
+        conn.commit()
 
-        if not organizador or not organizador.get("access_token_mp"):
-            return "Error: el organizador no tiene MercadoPago conectado"
-
-        access_token = organizador["access_token_mp"]
-
-        
-
-        comision = round(precio * Decimal("0.03"), 2)
-        precio_final = precio + comision
-
-        # 🔥 crear pago
-        # 🔥 crear pago
-        sdk = mercadopago.SDK(access_token)
-
-        preference_data = {
-            "items": [
-                {
-                    "title": f"Inscripción {nombre_evento}",
-                    "quantity": 1,
-                    "unit_price": float(round(precio, 2))  # 🔥 usamos precio directo
-                }
-            ],
-            # "application_fee": round(comision, 2),  ❌ desactivado por ahora
-            "external_reference": str(inscripcion_id),
-            "back_urls": {
-                "success": f"{BASE_URL}/pago_exitoso",
-                "failure": f"{BASE_URL}/pago_error",
-                "pending": f"{BASE_URL}/pago_pendiente"
-            },
-            "auto_return": "approved"
-        }
-
-        preference = sdk.preference().create(preference_data)
-        
+        enviar_confirmacion(
+            email,
+            nombre + " " + apellido,
+            dni,
+            nombre_evento,
+            "Ver fecha del evento",
+            "Inscripción gratuita",
+            numero,
+            f"{BASE_URL}/static/eventos/evento.jpg"
+        )
 
         cursor.close()
         conn.close()
-        return redirect(preference["response"]["init_point"])
+
+        return f"""
+        <div style="max-width:420px;margin:60px auto;
+        background:white;padding:30px;border-radius:14px;
+        text-align:center;font-family:Arial;
+        box-shadow:0 10px 25px rgba(0,0,0,.12);">
+
+        <h2>✅ Inscripción confirmada</h2>
+        <p>Tu inscripción gratuita fue registrada.</p>
+        <p><b>Número:</b> {numero}</p>
+        <p>Te enviamos el comprobante por email.</p>
+
+        <a href="/">
+            <button style="padding:10px 18px;">
+            Volver
+            </button>
+        </a>
+
+        </div>
+        """
+
+    # 🔥 OBTENER TOKEN DEL ORGANIZADOR
+    cursor.execute("""
+    SELECT o.access_token_mp
+    FROM eventos e
+    JOIN organizadores o ON e.organizador_id = o.id
+    WHERE e.id = %s
+    """, (evento_id,))
+
+    organizador = cursor.fetchone()
+
+    if not organizador or not organizador.get("access_token_mp"):
+        cursor.close()
+        conn.close()
+        return "Error: el organizador no tiene MercadoPago conectado"
+
+    access_token = organizador["access_token_mp"]
+
+    sdk = mercadopago.SDK(access_token)
+
+    preference_data = {
+        "items": [
+            {
+                "title": f"Inscripción {nombre_evento}",
+                "quantity": 1,
+                "unit_price": float(round(precio, 2))
+            }
+        ],
+        "external_reference": str(inscripcion_id),
+        "back_urls": {
+            "success": f"{BASE_URL}/pago_exitoso",
+            "failure": f"{BASE_URL}/pago_error",
+            "pending": f"{BASE_URL}/pago_pendiente"
+        },
+        "auto_return": "approved"
+    }
+
+    preference = sdk.preference().create(preference_data)
+
+    cursor.close()
+    conn.close()
+
+    return redirect(preference["response"]["init_point"])
 
         
                 
@@ -2776,20 +2816,21 @@ def test_mail():
 def test_confirmacion():
 
     enviar_confirmacion(
-        "tuemail@gmail.com",
+        "alejandro.torres1683@gmail.com",
         "Alejandro Torres",
         "23456789",
         "10K Berazategui",
         "12/07/2026",
         "10K",
         "5-00000154",
-        "https://via.placeholder.com/700x300.png?text=10K+Berazategui"
+        "http://localhost:5000/static/eventos/evento.jpg"
     )
 
     return "confirmacion probada"
 @app.route("/preview-mail")
 def preview_mail():
-    qr = generar_qr_base64("5-000154")
+    numero = "5-000154"
+    qr = generar_qr_base64(numero)
     html = f"""
     <div style="font-family:Arial; max-width:700px; margin:auto; background:#ffffff; border:1px solid #ddd; border-radius:12px; overflow:hidden;">
 
@@ -2809,8 +2850,8 @@ def preview_mail():
             <p><b>DNI:</b> 23456789</p>
             <p><b>Distancia:</b> 10K</p>
 
-            <div style="margin:30px auto;">
-                <img src="data:image/png;base64,{qr}" width="220">
+            <div style="margin:30px auto; text-align:center;">
+                <img src="data:image/png;base64,{qr}" width="220" style="display:block; margin:auto;">
             </div>
 
             <p style="font-size:22px;"><b>N° 5-000154</b></p>
