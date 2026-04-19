@@ -26,7 +26,7 @@ def enviar_mail(destino, asunto, html):
 
         
 
-        server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=40)
+        server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10)
         server.ehlo()
         server.starttls()
         server.ehlo()

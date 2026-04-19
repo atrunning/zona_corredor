@@ -2204,16 +2204,19 @@ def inscribirse(evento_id):
 
         conn.commit()
 
-        enviar_confirmacion(
-            email,
-            nombre + " " + apellido,
-            dni,
-            nombre_evento,
-            "Ver fecha del evento",
-            "Inscripción gratuita",
-            numero,
-            f"{BASE_URL}/static/eventos/evento.jpg"
-        )
+        try:
+            enviar_confirmacion(
+                email,
+                nombre + " " + apellido,
+                dni,
+                nombre_evento,
+                "Ver fecha del evento",
+                "Inscripción gratuita",
+                numero,
+                f"{BASE_URL}/static/eventos/evento.jpg"
+            )
+        except Exception as e:
+            print("MAIL GRATIS ERROR:", e)
 
         cursor.close()
         conn.close()
