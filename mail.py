@@ -1,60 +1,57 @@
 import os
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import requests
 
 # =========================
-# CONFIGURACION SMTP BREVO
+# CONFIGURACION API BREVO
 # =========================
-SMTP_HOST = "smtp-relay.brevo.com"
-SMTP_PORT = 587
-
-SMTP_USER = os.getenv("SMTP_USER")
-SMTP_PASS = os.getenv("SMTP_PASS")
+BREVO_API_KEY = os.getenv("BREVO_API_KEY")
 
 
 def prueba_mail():
-    print("mail.py funcionando")
+    print("mail.py funcionando con API Brevo")
 
 
 def enviar_mail(destino, asunto, html):
     try:
-        print("===== INICIANDO SMTP =====")
+        print("===== INICIANDO API BREVO =====")
 
-        if not SMTP_USER or not SMTP_PASS:
-            print("Faltan variables SMTP_USER o SMTP_PASS")
+        if not BREVO_API_KEY:
+            print("Falta variable BREVO_API_KEY")
             return False
 
-        msg = MIMEMultipart("alternative")
-        msg["From"] = SMTP_USER
-        msg["To"] = destino
-        msg["Subject"] = asunto
+        url = "https://api.brevo.com/v3/smtp/email"
 
-        msg.attach(MIMEText(html, "html", "utf-8"))
+        headers = {
+            "accept": "application/json",
+            "api-key": BREVO_API_KEY,
+            "content-type": "application/json"
+        }
 
-        server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20)
-        server.set_debuglevel(1)
+        payload = {
+            "sender": {
+                "name": "Zona Corredor",
+                "email": "inscripciones@zonacorredor.com.ar"
+            },
+            "to": [
+                {
+                    "email": destino
+                }
+            ],
+            "subject": asunto,
+            "htmlContent": html
+        }
 
-        print("CONECTADO A SERVIDOR")
+        r = requests.post(
+            url,
+            json=payload,
+            headers=headers,
+            timeout=20
+        )
 
-        server.ehlo()
-        print("EHLO OK")
+        print("STATUS:", r.status_code)
+        print("RESPUESTA:", r.text)
 
-        server.starttls()
-        print("TLS OK")
-
-        server.ehlo()
-
-        server.login(SMTP_USER, SMTP_PASS)
-        print("LOGIN OK")
-
-        server.send_message(msg)
-        print("MAIL ENVIADO A:", destino)
-
-        server.quit()
-        print("SMTP CERRADO")
-
-        return True
+        return r.status_code in [200, 201, 202]
 
     except Exception as e:
         print("ERROR MAIL:", repr(e))
