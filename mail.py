@@ -68,7 +68,7 @@ def enviar_confirmacion(
     numero,
     imagen
 ):
-
+    print("IMAGEN RECIBIDA:", imagen)
     html = f"""
     <html>
     <head>
