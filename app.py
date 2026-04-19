@@ -2205,15 +2205,21 @@ def inscribirse(evento_id):
         conn.commit()
 
         try:
+            cursor.execute("SELECT imagen, fecha FROM eventos WHERE id=%s", (evento_id,))
+            ev = cursor.fetchone()
+
+            imagen_evento = ev["imagen"] if ev["imagen"] else "evento.jpg"
+            fecha_evento = ev["fecha"].strftime("%d/%m/%Y")
+
             enviar_confirmacion(
                 email,
                 nombre + " " + apellido,
                 dni,
                 nombre_evento,
-                "Ver fecha del evento",
+                fecha_evento,
                 "Inscripción gratuita",
                 numero,
-                f"{BASE_URL}/static/eventos/evento.jpg"
+                f"{BASE_URL}/static/eventos/{imagen_evento}"
             )
         except Exception as e:
             print("MAIL GRATIS ERROR:", e)
