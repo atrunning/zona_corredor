@@ -1,12 +1,16 @@
+import os
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+# =========================
+# CONFIGURACION SMTP BREVO
+# =========================
 SMTP_HOST = "smtp-relay.brevo.com"
 SMTP_PORT = 587
 
-SMTP_USER = "a8939b001@smtp-brevo.com"
-SMTP_PASS = "N5nK1L9mZDtAFGP2"
+SMTP_USER = os.getenv("SMTP_USER")
+SMTP_PASS = os.getenv("SMTP_PASS")
 
 
 def prueba_mail():
@@ -15,7 +19,11 @@ def prueba_mail():
 
 def enviar_mail(destino, asunto, html):
     try:
-        print("INICIANDO SMTP")
+        print("===== INICIANDO SMTP =====")
+
+        if not SMTP_USER or not SMTP_PASS:
+            print("Faltan variables SMTP_USER o SMTP_PASS")
+            return False
 
         msg = MIMEMultipart("alternative")
         msg["From"] = SMTP_USER
@@ -24,8 +32,10 @@ def enviar_mail(destino, asunto, html):
 
         msg.attach(MIMEText(html, "html", "utf-8"))
 
-        server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10)
-        print("CONECTO")
+        server = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20)
+        server.set_debuglevel(1)
+
+        print("CONECTADO A SERVIDOR")
 
         server.ehlo()
         print("EHLO OK")
@@ -39,16 +49,15 @@ def enviar_mail(destino, asunto, html):
         print("LOGIN OK")
 
         server.send_message(msg)
-        print("SEND OK")
+        print("MAIL ENVIADO A:", destino)
 
         server.quit()
-        print("QUIT OK")
+        print("SMTP CERRADO")
 
-        print("MAIL ENVIADO A:", destino)
         return True
 
     except Exception as e:
-        print("Error mail:", e)
+        print("ERROR MAIL:", repr(e))
         return False
 
 
