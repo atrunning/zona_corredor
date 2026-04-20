@@ -405,6 +405,7 @@ def pagar_mp(numero):
 
     inscripcion_id = ins["id"]
     precio = float(ins["precio"])
+    precio_final = round(precio * 1.03, 2)
     access_token = ins["access_token_mp"]
 
     # SDK con token del organizador correcto
@@ -417,7 +418,7 @@ def pagar_mp(numero):
                 "title": f"Inscripción {numero}",
                 "quantity": 1,
                 "currency_id": "ARS",
-                "unit_price": precio
+                "unit_price": precio_final
             }
         ],
         "external_reference": str(inscripcion_id),
