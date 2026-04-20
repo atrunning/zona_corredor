@@ -1980,6 +1980,8 @@ def editar_evento(evento_id):
         editor = e;
     })
     .catch(error => console.error(error));
+    </script>
+    """
             
         
 
