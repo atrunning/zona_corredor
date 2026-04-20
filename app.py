@@ -19,7 +19,7 @@ from decimal import Decimal
 
 import os
 from mail import enviar_confirmacion, prueba_mail
-prueba_mail()
+
 BASE_URL = os.getenv("BASE_URL", "http://localhost:5000")
 print("🔥 BASE_URL EN PRODUCCION:", BASE_URL)
 import qrcode
@@ -372,7 +372,6 @@ def webhook_mp():
 def pagar_mp(numero):
 
     import mercadopago
-    import os
     from db import get_db_connection
 
     conn = get_db_connection()
@@ -405,12 +404,17 @@ def pagar_mp(numero):
 
     inscripcion_id = ins["id"]
     precio = float(ins["precio"])
-    precio_final = round(precio * 1.03, 2)
+
+    # Comisión plataforma 3%
+    comision = round(precio * 0.03, 2)
+
+    # Total que paga el corredor
+    precio_final = round(precio + comision, 2)
+
     access_token = ins["access_token_mp"]
 
-    # SDK con token del organizador correcto
+    # SDK con token del organizador
     sdk = mercadopago.SDK(access_token)
-    
 
     preference_data = {
         "items": [
@@ -421,13 +425,20 @@ def pagar_mp(numero):
                 "unit_price": precio_final
             }
         ],
+
+        # Comisión automática para la plataforma
+        "marketplace_fee": comision,
+
         "external_reference": str(inscripcion_id),
+
         "back_urls": {
             "success": f"{BASE_URL}/pago_exitoso",
             "failure": f"{BASE_URL}/pago_error",
             "pending": f"{BASE_URL}/pago_pendiente"
         },
+
         "auto_return": "approved",
+
         "notification_url": f"{BASE_URL}/webhook_mp"
     }
 
@@ -2307,107 +2318,10 @@ def inscribirse(evento_id):
 
         
 
-    # 🔥 OBTENER TOKEN DEL ORGANIZADOR
-    cursor.execute("""
-    SELECT o.access_token_mp
-    FROM eventos e
-    JOIN organizadores o ON e.organizador_id = o.id
-    WHERE e.id = %s
-    """, (evento_id,))
-
-    organizador = cursor.fetchone()
-
-    if not organizador or not organizador.get("access_token_mp"):
         cursor.close()
         conn.close()
-        return "Error: el organizador no tiene MercadoPago conectado"
 
-    access_token = organizador["access_token_mp"]
-    
-    mensaje_descuento = ""
-
-    if descuento_cupon > 0:
-        mensaje_descuento = f"""
-        <div style="
-        max-width:420px;
-        margin:20px auto;
-        padding:15px;
-        background:#e8f5e9;
-        border:1px solid #81c784;
-        border-radius:10px;
-        text-align:center;
-        font-family:Arial;
-        color:#2e7d32;
-        font-weight:bold;
-        ">
-        🎉 Cupón aplicado: {descuento_cupon}% OFF
-        </div>
-        """
-    
-
-    sdk = mercadopago.SDK(access_token)
-
-    preference_data = {
-        "items": [
-            {
-                "title": f"Inscripción {nombre_evento}",
-                "quantity": 1,
-                "unit_price": float(round(precio, 2))
-            }
-        ],
-        "external_reference": str(inscripcion_id),
-        "back_urls": {
-            "success": f"{BASE_URL}/pago_exitoso",
-            "failure": f"{BASE_URL}/pago_error",
-            "pending": f"{BASE_URL}/pago_pendiente"
-        },
-        "auto_return": "approved"
-    }
-
-    preference = sdk.preference().create(preference_data)
-
-    cursor.close()
-    conn.close()
-
-    link_pago = preference["response"]["init_point"]
-
-    return f"""
-    {mensaje_descuento}
-
-    <div style="
-    max-width:420px;
-    margin:40px auto;
-    background:white;
-    padding:30px;
-    border-radius:14px;
-    text-align:center;
-    font-family:Arial;
-    box-shadow:0 10px 25px rgba(0,0,0,.12);
-    ">
-
-    <h2>💳 Finalizar pago</h2>
-
-    <p>Total a pagar:</p>
-
-    <h1>${format(int(precio), ",").replace(",", ".")}</h1>
-
-    <a href="{link_pago}">
-        <button style="
-        padding:12px 24px;
-        background:#009ee3;
-        color:white;
-        border:none;
-        border-radius:8px;
-        font-size:16px;
-        cursor:pointer;
-        ">
-        Ir a Mercado Pago
-        </button>
-    </a>
-
-    </div>
-    """
-
+        return redirect(f"/pagar_mp/{numero}")
         
                 
 
@@ -2943,25 +2857,7 @@ def toggle_publicado(evento_id):
     window.location.href="/evento/{evento_id}/panel"
     </script>
     """
-@app.route("/test-mail")
-def test_mail():
-    prueba_mail()
-    return "mail ok"
-@app.route("/test-confirmacion")
-def test_confirmacion():
 
-    enviar_confirmacion(
-        "alejandro.torres1683@gmail.com",
-        "Alejandro Torres",
-        "23456789",
-        "10K Berazategui",
-        "12/07/2026",
-        "10K",
-        "5-00000154",
-        "http://localhost:5000/static/eventos/evento.jpg"
-    )
-
-    return "confirmacion probada"
 @app.route("/preview-mail")
 def preview_mail():
     numero = "5-000154"
