@@ -1954,21 +1954,40 @@ def editar_evento(evento_id):
     let editor;
 
     ClassicEditor
-        .create(document.querySelector('#editor'), {
-            extraPlugins: [ MyCustomUploadAdapterPlugin ],
-        })
-        .then(e => {
-            editor = e;
-        })
-        .catch(error => console.error(error));
-    </script>
-    """
+    .create(document.querySelector('#editor'), {
+        extraPlugins: [ MyCustomUploadAdapterPlugin ],
+
+        toolbar: [
+            'heading',
+            '|',
+            'bold',
+            'italic',
+            'link',
+            'bulletedList',
+            'numberedList',
+            '|',
+            'fontColor',
+            'fontBackgroundColor',
+            '|',
+            'insertTable',
+            'uploadImage',
+            '|',
+            'undo',
+            'redo'
+        ]
+    })
+    .then(e => {
+        editor = e;
+    })
+    .catch(error => console.error(error));
+            
+        
 
     # =========================
     # MAPA
     # =========================
     salida += f"""
-    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAO2tAZ13XqjSbEPBk7CUqybYU3PBajFGk&libraries=places"></script>
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAO2tAZ13XqjSbEPBk7CUqybYU3PBajFGk&libraries=places&callback=initMap" async defer></script>
 
     <script>
     function initMap() {{
@@ -2008,7 +2027,7 @@ def editar_evento(evento_id):
         }});
     }}
 
-    window.addEventListener("load", initMap);
+    
     </script>
     """
 
