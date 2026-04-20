@@ -774,9 +774,8 @@ def administrar_distancias(evento_id):
         fecha_inicio = request.form.get("fecha_inicio")
         fecha_fin = request.form.get("fecha_fin")
 
-        incluye_remera = 1 if request.form.get("incluye_remera") else 0
-        es_gratis = 1 if request.form.get("es_gratis") else 0
-
+        incluye_remera = int(request.form.get("incluye_remera", 0))
+        es_gratis = int(request.form.get("es_gratis", 0))
         validar_edad = 1 if request.form.get("validar_edad") else 0
         edad_min = request.form.get("edad_min")
         edad_max = request.form.get("edad_max")
