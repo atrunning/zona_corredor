@@ -1499,9 +1499,13 @@ def reporte_remeras(evento_id):
     SELECT talle_remera, COUNT(*) AS cantidad
     FROM inscripciones
     WHERE evento_id = %s
+    AND estado_pago IN ('pagado','gratis')
+    AND talle_remera IS NOT NULL
+    AND talle_remera <> ''
+    AND talle_remera <> 'None'
     GROUP BY talle_remera
     ORDER BY talle_remera
-    """,(evento_id,))
+    """, (evento_id,))
 
     talles = cursor.fetchall()
 
@@ -1749,6 +1753,11 @@ def inscribirse(evento_id):
         <input type="text" name="ciudad" value="{persona['ciudad']}" placeholder="Ciudad"
         style="padding:10px;border:1px solid #ccc;border-radius:6px;">
 
+        <input type="text" name="direccion"
+        value="{persona.get('direccion','')}"
+        placeholder="Dirección"
+        style="padding:10px;border:1px solid #ccc;border-radius:6px;">
+
         <h3>Redes (opcional)</h3>
 
         <input type="text" name="instagram" placeholder="Instagram"
@@ -1962,6 +1971,7 @@ def inscribirse(evento_id):
 
         provincia_id = request.form["provincia_id"]
         ciudad = request.form["ciudad"]
+        direccion = request.form.get("direccion", "").upper()
         instagram = request.form.get("instagram")
         strava = request.form.get("strava")
         facebook = request.form.get("facebook")
@@ -2051,8 +2061,8 @@ def inscribirse(evento_id):
 
             cursor.execute("""
             INSERT INTO personas
-            (dni, nombre, apellido, email, celular, fecha_nac, genero, pais_id, provincia_id, ciudad, team_id, instagram, strava, facebook)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            (dni, nombre, apellido, email, celular, fecha_nac, genero, pais_id, provincia_id, ciudad, direccion, team_id, instagram, strava, facebook)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             """, (
                 dni,
                 nombre.upper(),
@@ -2064,6 +2074,7 @@ def inscribirse(evento_id):
                 pais_id,
                 provincia_id,
                 ciudad.upper(),
+                direccion,
                 team_id,
                 instagram,
                 strava,
@@ -2078,34 +2089,36 @@ def inscribirse(evento_id):
             cursor.execute("""
             UPDATE personas
             SET nombre=%s,
-                apellido=%s,
-                email=%s,
-                celular=%s,
-                fecha_nac=%s,
-                genero=%s,
-                pais_id=%s,
-                provincia_id=%s,
-                ciudad=%s,
-                team_id=%s,
-                instagram=%s,
-                strava=%s,
-                facebook=%s
+            apellido=%s,
+            email=%s,
+            celular=%s,
+            fecha_nac=%s,
+            genero=%s,
+            pais_id=%s,
+            provincia_id=%s,
+            ciudad=%s,
+            direccion=%s,
+            team_id=%s,
+            instagram=%s,
+            strava=%s,
+            facebook=%s
             WHERE id=%s
             """,(
-                nombre.upper(),
-                apellido.upper(),
-                email,
-                celular,
-                fecha_nacimiento,
-                genero,
-                pais_id,
-                provincia_id,
-                ciudad.upper(),
-                team_id,
-                instagram,
-                strava,
-                facebook,
-                persona_id
+            nombre.upper(),
+            apellido.upper(),
+            email,
+            celular,
+            fecha_nacimiento,
+            genero,
+            pais_id,
+            provincia_id,
+            ciudad.upper(),
+            direccion,
+            team_id,
+            instagram,
+            strava,
+            facebook,
+            persona_id
             ))
 
         conn.commit()
