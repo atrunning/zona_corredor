@@ -1754,7 +1754,7 @@ def inscribirse(evento_id):
         style="padding:10px;border:1px solid #ccc;border-radius:6px;">
 
         <input type="text" name="direccion"
-        value="{persona.get('direccion','')}"
+        value="{'' if persona.get('direccion') in [None, 'None'] else persona.get('direccion')}"
         placeholder="Dirección"
         style="padding:10px;border:1px solid #ccc;border-radius:6px;">
 
