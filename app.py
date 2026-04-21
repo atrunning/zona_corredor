@@ -377,9 +377,9 @@ def pagar_mp(numero):
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
-    # Buscar inscripción + precio + token del organizador
+    # Buscar inscripción + precio + token organizador
     cursor.execute("""
-    SELECT 
+    SELECT
         i.id,
         i.numero_inscripcion,
         d.precio,
@@ -405,15 +405,12 @@ def pagar_mp(numero):
     inscripcion_id = ins["id"]
     precio = float(ins["precio"])
 
-    # Comisión plataforma 3%
-    comision = round(precio * 0.03, 2)
-
-    # Total que paga el corredor
-    precio_final = round(precio + comision, 2)
+    # 🔥 Comisión plataforma visible al corredor
+    precio_final = round(precio * 1.03, 2)
 
     access_token = ins["access_token_mp"]
 
-    # SDK con token del organizador
+    # 🔥 Cobra con cuenta del organizador
     sdk = mercadopago.SDK(access_token)
 
     preference_data = {
@@ -425,20 +422,13 @@ def pagar_mp(numero):
                 "unit_price": precio_final
             }
         ],
-
-        # Comisión automática para la plataforma
-        "marketplace_fee": comision,
-
         "external_reference": str(inscripcion_id),
-
         "back_urls": {
             "success": f"{BASE_URL}/pago_exitoso",
             "failure": f"{BASE_URL}/pago_error",
             "pending": f"{BASE_URL}/pago_pendiente"
         },
-
         "auto_return": "approved",
-
         "notification_url": f"{BASE_URL}/webhook_mp"
     }
 
