@@ -2545,12 +2545,7 @@ def panel_evento(evento_id):
     <script>
     function copiarLink(evento_id, nombre_evento) {
 
-        const slug = nombre_evento
-            .toLowerCase()
-            .replace(/[^a-z0-9\s-]/g, "")
-            .replace(/\s+/g, "-");
-
-        const url = window.location.origin + "/evento/" + evento_id + "/" + slug;
+        const url = window.location.origin + "/evento/" + evento_id;
 
         const temp = document.createElement("input");
         temp.value = url;
@@ -2563,7 +2558,6 @@ def panel_evento(evento_id):
     }
     </script>
     """
-    
     # -------------------
     # TABLA DISTANCIAS (NO BORRÉ)
     # -------------------
