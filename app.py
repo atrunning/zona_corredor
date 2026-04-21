@@ -405,12 +405,15 @@ def pagar_mp(numero):
     inscripcion_id = ins["id"]
     precio = float(ins["precio"])
 
-    # 🔥 Comisión plataforma visible al corredor
-    precio_final = round(precio * 1.03, 2)
+    # 💰 comisión 3%
+    comision = round(precio * 0.03, 2)
+
+    # 💳 total que paga corredor
+    precio_final = round(precio + comision, 2)
 
     access_token = ins["access_token_mp"]
 
-    # 🔥 Cobra con cuenta del organizador
+    # Cobra con token del organizador
     sdk = mercadopago.SDK(access_token)
 
     preference_data = {
@@ -422,12 +425,18 @@ def pagar_mp(numero):
                 "unit_price": precio_final
             }
         ],
+
+        # 🔥 SPLIT REAL
+        "marketplace_fee": comision,
+
         "external_reference": str(inscripcion_id),
+
         "back_urls": {
             "success": f"{BASE_URL}/pago_exitoso",
             "failure": f"{BASE_URL}/pago_error",
             "pending": f"{BASE_URL}/pago_pendiente"
         },
+
         "auto_return": "approved",
         "notification_url": f"{BASE_URL}/webhook_mp"
     }
