@@ -1912,77 +1912,30 @@ def editar_evento(evento_id):
     # CKEDITOR
     # =========================
     salida += """
-    <script src="https://cdn.ckeditor.com/ckeditor5/39.0.1/classic/ckeditor.js"></script>
+    <script src="https://cdn.ckeditor.com/4.22.1/full/ckeditor.js"></script>
 
     <script>
-    class MyUploadAdapter {
-        constructor(loader) {
-            this.loader = loader;
-        }
-
-        upload() {
-            return this.loader.file.then(file => {
-                return new Promise((resolve, reject) => {
-
-                    const data = new FormData();
-                    data.append('upload', file);
-
-                    fetch('/subir_imagen', {
-                        method: 'POST',
-                        body: data
-                    })
-                    .then(response => response.json())
-                    .then(result => {
-                        resolve({
-                            default: result.url
-                        });
-                    })
-                    .catch(error => reject(error));
-                });
-            });
-        }
-
-        abort() {}
-    }
-
-    function MyCustomUploadAdapterPlugin(editor) {
-        editor.plugins.get('FileRepository').createUploadAdapter = (loader) => {
-            return new MyUploadAdapter(loader);
-        };
-    }
-
-    let editor;
-
-    ClassicEditor
-    .create(document.querySelector('#editor'), {
-        extraPlugins: [ MyCustomUploadAdapterPlugin ],
+    CKEDITOR.replace('editor', {
+        height: 350,
 
         toolbar: [
-            'heading',
-            '|',
-            'bold',
-            'italic',
-            'link',
-            'bulletedList',
-            'numberedList',
-            '|',
-            'fontColor',
-            'fontBackgroundColor',
-            '|',
-            'insertTable',
-            'uploadImage',
-            '|',
-            'undo',
-            'redo'
-        ]
-    })
-    .then(e => {
-        editor = e;
-    })
-    .catch(error => console.error(error));
+            { name: 'styles', items: ['Format','Font','FontSize'] },
+            { name: 'basicstyles', items: ['Bold','Italic','Underline','Strike'] },
+            { name: 'colors', items: ['TextColor','BGColor'] },
+            { name: 'paragraph', items: ['NumberedList','BulletedList','Outdent','Indent','Blockquote'] },
+            { name: 'links', items: ['Link','Unlink'] },
+            { name: 'insert', items: ['Image','Table','HorizontalRule'] },
+            { name: 'clipboard', items: ['Undo','Redo'] },
+            { name: 'tools', items: ['Maximize','Source'] }
+        ],
+
+        removeButtons: '',
+        allowedContent: true
+    });
     </script>
     """
-            
+
+    
         
 
     # =========================
