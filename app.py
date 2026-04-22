@@ -1,6 +1,7 @@
 from flask import Flask, request
 from db import get_db_connection
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 app = Flask(__name__)
 app.secret_key = "12356"
@@ -1841,8 +1842,6 @@ def inscribirse(evento_id):
             return "Error: distancia perdida 😈"
 
          
-        from datetime import date, datetime
-
         fecha_nac = request.form.get("fecha_nacimiento")
 
         if not fecha_nac:
@@ -2216,13 +2215,25 @@ def inscribirse(evento_id):
         # insertar inscripción
         # -----------------------------
 
-        
+        fecha_inscripcion = datetime.now(ZoneInfo("America/Argentina/Buenos_Aires")).strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute("""
         INSERT INTO inscripciones
-        (evento_id, persona_id, distancia_id, edad_evento, email_contacto, telefono_contacto, estado_pago, talle_remera)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-        """,
-        (evento_id, persona_id, distancia_id, edad_evento, email, celular, "pendiente", talle_remera))
+        (evento_id, persona_id, distancia_id, edad_evento, email_contacto, telefono_contacto, estado_pago, talle_remera, fecha_inscripcion)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """, (
+            evento_id,
+            persona_id,
+            distancia_id,
+            edad_evento,
+            email,
+            celular,
+            "pendiente",
+            talle_remera,
+            fecha_inscripcion
+        ))
+        
+        
+        (evento_id, persona_id, distancia_id, edad_evento, email, celular, "pendiente", talle_remera, fecha_inscripcion)
         conn.commit()
 
         inscripcion_id = cursor.lastrowid
