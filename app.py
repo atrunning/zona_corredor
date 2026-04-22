@@ -308,24 +308,34 @@ def webhook_mp():
 
     if info.get("status") == "approved":
 
+        
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
         comprobante = info.get("id")
         monto = float(info.get("transaction_amount", 0))
+
+        fecha_mp = info.get("date_approved")
+
+        dt = datetime.fromisoformat(fecha_mp.replace("Z", "+00:00"))
+        fecha_arg = dt.astimezone(
+            ZoneInfo("America/Argentina/Buenos_Aires")
+        )
 
         cursor.execute("""
         UPDATE pagos
         SET estado = 'aprobado',
             monto = %s,
             referencia_externa = %s,
-            fecha_confirmacion = NOW()
+            fecha_confirmacion = %s
         WHERE inscripcion_id = %s
         AND estado = 'pendiente'
-        """, (monto, comprobante, inscripcion_id))
-
-        cursor.execute("""
-        UPDATE inscripciones
-        SET estado_pago = 'pagado'
-        WHERE id = %s
-        """, (inscripcion_id,))
+        """, (
+            monto,
+            comprobante,
+            fecha_arg.strftime("%Y-%m-%d %H:%M:%S"),
+            inscripcion_id
+        ))
 
         conn.commit()
         
