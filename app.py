@@ -855,7 +855,25 @@ def login():
 
     <input type="email" name="email" placeholder="Email" required style="padding:10px">
 
-    <input type="password" name="password" placeholder="Contraseña" required style="padding:10px">
+    <div style="position:relative;">
+
+    <input type="password" id="password" name="password"
+    placeholder="Contraseña" required
+    style="padding:10px;width:100%;box-sizing:border-box;">
+
+    <button type="button" onclick="togglePassword()" style="
+    position:absolute;
+    right:8px;
+    top:7px;
+    border:none;
+    background:none;
+    cursor:pointer;
+    font-size:18px;
+    ">
+    👁️
+    </button>
+
+    </div>
 
     <button style="padding:10px;background:#1976d2;color:white;border:none;border-radius:5px">
     Entrar
@@ -880,6 +898,17 @@ def login():
     </a>
 
     </div>
+    <script>
+    function togglePassword() {
+        let campo = document.getElementById("password");
+
+        if (campo.type === "password") {
+            campo.type = "text";
+        } else {
+            campo.type = "password";
+        }
+    }
+    </script>
 
     </div>
     """
@@ -1134,9 +1163,27 @@ def ver_evento(evento_id):
 
     </div>
 
-    <div style="text-align:center;margin-top:25px; display:flex; justify-content:center; gap:15px; flex-wrap:wrap;">
+    <div style="
+    text-align:center;
+    margin-top:25px;
+    display:flex;
+    justify-content:center;
+    gap:12px;
+    flex-wrap:wrap;
+    ">
 
-    <!-- IZQUIERDA -->
+    <a href="/static/documentos/{evento['reglamento_archivo']}" target="_blank"
+    style="
+    padding:10px 18px;
+    background:#1565c0;
+    color:white;
+    border-radius:8px;
+    text-decoration:none;
+    display:{'inline-block' if evento.get('reglamento_activo') and evento.get('reglamento_archivo') else 'none'};
+    ">
+    📄 Reglamento
+    </a>
+
     <button onclick="abrirVerificar()" style="
     padding:10px 20px;
     background:#607d8b;
@@ -1149,7 +1196,6 @@ def ver_evento(evento_id):
     🔍 Verificar inscripción
     </button>
 
-    <!-- CENTRO -->
     <button onclick="abrirDistancias()" style="
     padding:12px 28px;
     background:#2e7d32;
@@ -1162,8 +1208,19 @@ def ver_evento(evento_id):
     INSCRIBIRME
     </button>
 
-    <!-- DERECHA -->
     {boton_pagar}
+
+    <a href="/static/documentos/{evento['deslinde_archivo']}" target="_blank"
+    style="
+    padding:10px 18px;
+    background:#ef6c00;
+    color:white;
+    border-radius:8px;
+    text-decoration:none;
+    display:{'inline-block' if evento.get('deslinde_activo') and evento.get('deslinde_archivo') else 'none'};
+    ">
+    ⚖️ Deslinde
+    </a>
 
     </div>
 
@@ -2327,7 +2384,9 @@ def inscribirse(evento_id):
 
                     </div>
                     """        
-        
+        fecha_pago = datetime.now(
+            ZoneInfo("America/Argentina/Buenos_Aires")
+        ).strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute("""
         INSERT INTO pagos (
             inscripcion_id,
@@ -2337,13 +2396,14 @@ def inscribirse(evento_id):
             referencia_externa,
             fecha_creacion
         )
-        VALUES (%s, %s, %s, %s, %s, NOW())
+        VALUES (%s, %s, %s, %s, %s, %s)
         """, (
             inscripcion_id,
             float(precio),  # después lo mejoramos
             "mercadopago",
             "pendiente",
-            str(inscripcion_id)
+            str(inscripcion_id),
+            fecha_pago
         ))
         
 

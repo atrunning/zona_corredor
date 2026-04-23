@@ -597,71 +597,87 @@ def nuevo_evento():
     if request.method == "GET":
 
         salida += """
-        <h1>Crear nuevo evento</h1>
+    <h1>Crear nuevo evento</h1>
 
-        <form method="POST" enctype="multipart/form-data">
+    <form method="POST" enctype="multipart/form-data">
 
-        Nombre del evento<br>
-        <input type="text" name="nombre" style="width:350px" required>
+    Nombre del evento<br>
+    <input type="text" name="nombre" style="width:350px" required>
 
-        <br><br>
+    <br><br>
 
-        Fecha<br>
-        <input type="date" name="fecha" required>
+    Fecha<br>
+    <input type="date" name="fecha" required>
 
-        <br><br>
+    <br><br>
 
-        Hora<br>
-        <input type="time" name="hora">
+    Hora<br>
+    <input type="time" name="hora">
 
-        <br><br>
+    <br><br>
 
-        Lugar<br>
-        <input type="text" name="lugar" style="width:350px" required>
+    Lugar<br>
+    <input type="text" name="lugar" style="width:350px" required>
 
-        <br><br>
+    <br><br>
 
-        Provincia<br>
-        <input type="text" name="provincia" style="width:350px">
+    Provincia<br>
+    <input type="text" name="provincia" style="width:350px">
 
-        <br><br>
+    <br><br>
 
-        Flyer del evento<br>
-        <input type="file" name="imagen" accept="image/*" onchange="previewImagen(event)">
+    Flyer del evento<br>
+    <input type="file" name="imagen" accept="image/*" onchange="previewImagen(event)">
 
-        <br><br>
+    <br><br>
 
-        <img id="preview" style="max-width:400px;display:none;border-radius:8px">
-                <small>Imagen promocional de la carrera</small>
+    <img id="preview" style="max-width:400px;display:none;border-radius:8px">
+    <small>Imagen promocional de la carrera</small>
 
-        <br><br>
+    <br><br>
 
-        <button type="submit">Crear evento</button>
+    <h3>📄 Documentos del evento</h3>
 
-        </form>
+    <label>
+    <input type="checkbox" name="reglamento_activo" value="1">
+    Activar Reglamento
+    </label>
+    <br>
+    <input type="file" name="reglamento_archivo" accept=".pdf,.txt">
 
-        <script>
+    <br><br>
 
-        function previewImagen(event){
+    <label>
+    <input type="checkbox" name="deslinde_activo" value="1">
+    Activar Deslinde
+    </label>
+    <br>
+    <input type="file" name="deslinde_archivo" accept=".pdf,.txt">
 
-            let reader = new FileReader()
+    <br><br>
 
-            reader.onload = function(){
+    <button type="submit">Crear evento</button>
 
-                let img = document.getElementById("preview")
+    </form>
 
-                img.src = reader.result
-                img.style.display = "block"
+    <script>
+    function previewImagen(event){
 
-            }
+        let reader = new FileReader()
 
-            reader.readAsDataURL(event.target.files[0])
+        reader.onload = function(){
+
+            let img = document.getElementById("preview")
+
+            img.src = reader.result
+            img.style.display = "block"
 
         }
 
-        </script>
-        """
-
+        reader.readAsDataURL(event.target.files[0])
+    }
+    </script>
+    """
         return layout(salida)
 
     # --------- cuando se envía el formulario ---------
@@ -676,6 +692,29 @@ def nuevo_evento():
 
     archivo = request.files.get("imagen")
     imagen = None
+
+    # -------- documentos --------
+
+    reglamento_activo = 1 if request.form.get("reglamento_activo") else 0
+    deslinde_activo = 1 if request.form.get("deslinde_activo") else 0
+
+    reglamento_archivo = None
+    deslinde_archivo = None
+
+    carpeta_docs = "static/documentos"
+
+    if not os.path.exists(carpeta_docs):
+        os.makedirs(carpeta_docs)
+
+    doc1 = request.files.get("reglamento_archivo")
+    if doc1 and doc1.filename != "":
+        reglamento_archivo = secure_filename(doc1.filename)
+        doc1.save(os.path.join(carpeta_docs, reglamento_archivo))
+
+    doc2 = request.files.get("deslinde_archivo")
+    if doc2 and doc2.filename != "":
+        deslinde_archivo = secure_filename(doc2.filename)
+        doc2.save(os.path.join(carpeta_docs, deslinde_archivo))
 
     if archivo and archivo.filename != "":
         imagen = secure_filename(archivo.filename)
@@ -701,9 +740,36 @@ def nuevo_evento():
 
     cursor.execute("""
     INSERT INTO eventos
-    (nombre, fecha, hora, lugar, provincia, imagen, organizador_id, estado, activo)
-    VALUES (%s,%s,%s,%s,%s,%s,%s,'cerrado',1)
-    """, (nombre, fecha, hora, lugar, provincia, imagen, organizador_id))
+    (
+    nombre,
+    fecha,
+    hora,
+    lugar,
+    provincia,
+    imagen,
+    organizador_id,
+    estado,
+    activo,
+    reglamento_activo,
+    reglamento_archivo,
+    deslinde_activo,
+    deslinde_archivo
+    )
+    VALUES
+    (%s,%s,%s,%s,%s,%s,%s,'cerrado',1,%s,%s,%s,%s)
+    """, (
+    nombre,
+    fecha,
+    hora,
+    lugar,
+    provincia,
+    imagen,
+    organizador_id,
+    reglamento_activo,
+    reglamento_archivo,
+    deslinde_activo,
+    deslinde_archivo
+    ))
 
     conn.commit()
 
@@ -1836,7 +1902,7 @@ def editar_evento(evento_id):
     <input type="date" name="fecha" value="{evento.get('fecha','')}"><br><br>
 
     Hora<br>
-    <input type="time" name="hora" value="{hora}"><br><br>
+    <input type="time" name="hora" value="{str(hora)[:5] if hora else ''}"><br><br>
 
     Lugar<br>
     <input type="text" name="lugar" value="{evento.get('lugar','')}" style="width:400px"><br><br>
@@ -1845,6 +1911,19 @@ def editar_evento(evento_id):
     <input type="text" name="provincia" value="{evento.get('provincia','')}" style="width:400px"><br><br>
 
     <h3>Descripción</h3>
+    <button type="button" onclick="document.getElementById('subirImgEditor').click()" style="
+    padding:10px 16px;
+    background:#1565c0;
+    color:white;
+    border:none;
+    border-radius:6px;
+    cursor:pointer;
+    margin-bottom:10px;
+    ">
+    📷 Insertar imagen
+    </button>
+
+<input type="file" id="subirImgEditor" accept="image/*" style="display:none">
     <textarea id="editor" name="descripcion" style="width:100%;height:200px;">
     {evento.get("descripcion","")}
     </textarea><br><br>
@@ -1886,6 +1965,14 @@ def editar_evento(evento_id):
     ">
     Guardar cambios
     </button>
+    
+    <script>
+    document.querySelector("form").addEventListener("submit", function() {{
+        for (var instance in CKEDITOR.instances) {{
+            CKEDITOR.instances[instance].updateElement();
+        }}
+    }});
+    </script>
 
     </form>
     """
@@ -1906,17 +1993,45 @@ def editar_evento(evento_id):
             reader.readAsDataURL(input.files[0]);
         }
     }
+    document.getElementById("subirImgEditor").addEventListener("change", async function () {
+
+        const archivo = this.files[0];
+        if (!archivo) return;
+
+        const datos = new FormData();
+        datos.append("upload", archivo);
+
+        const resp = await fetch("/subir_imagen_simple", {
+            method: "POST",
+            body: datos
+        });
+
+        const json = await resp.json();
+
+        if (json.url) {
+            CKEDITOR.instances.editor.insertHtml(
+                '<p><img src="' + json.url + '" style="max-width:100%;"></p>'
+            );
+        } else {
+            alert("Error al subir imagen");
+        }
+
+        this.value = "";
+    });
     </script>
     """
     # =========================
     # CKEDITOR
     # =========================
     salida += """
-    <script src="https://cdn.ckeditor.com/4.22.1/full/ckeditor.js"></script>
+        <script src="https://cdn.ckeditor.com/4.22.1/full/ckeditor.js"></script>
 
-    <script>
-    CKEDITOR.replace('editor', {
+        <script>
+        CKEDITOR.replace('editor', {
         height: 350,
+        uploadUrl: '/subir_imagen',
+        filebrowserUploadUrl: '/subir_imagen',
+        filebrowserUploadMethod: 'form',
 
         toolbar: [
             { name: 'styles', items: ['Format','Font','FontSize'] },
@@ -1924,7 +2039,7 @@ def editar_evento(evento_id):
             { name: 'colors', items: ['TextColor','BGColor'] },
             { name: 'paragraph', items: ['NumberedList','BulletedList','Outdent','Indent','Blockquote'] },
             { name: 'links', items: ['Link','Unlink'] },
-            { name: 'insert', items: ['Image','Table','HorizontalRule'] },
+            { name: 'insert', items: ['UploadImage','Image','Table','HorizontalRule'] },
             { name: 'clipboard', items: ['Undo','Redo'] },
             { name: 'tools', items: ['Maximize','Source'] }
         ],
@@ -2027,10 +2142,17 @@ def subir_imagen():
     url = f"/static/mapas/{nombre}"
 
     # ESTE JSON ES EL QUE CKEDITOR ESPERA
-    return jsonify({
-        "url": url
-    })
+    func_num = request.args.get("CKEditorFuncNum")
 
+    return f"""
+    <script>
+    window.parent.CKEDITOR.tools.callFunction(
+        {func_num},
+        "{url}",
+        "Imagen subida correctamente"
+    );
+    </script>
+    """
 @organizador_bp.route("/evento/<int:evento_id>/publicar")
 def publicar_evento(evento_id):
     conn = get_db_connection()
@@ -2105,6 +2227,33 @@ def pantalla_exportar(evento_id):
     """
 
     return layout(salida)
+@organizador_bp.route("/subir_imagen_simple", methods=["POST"])
+def subir_imagen_simple():
+
+    archivo = request.files.get("upload")
+
+    if not archivo:
+        return jsonify({"error": "sin archivo"})
+
+    import time, uuid
+
+    extension = archivo.filename.rsplit(".", 1)[-1].lower()
+    nombre = f"{int(time.time())}_{uuid.uuid4().hex[:6]}.{extension}"
+
+    carpeta = os.path.join("static", "mapas")
+    os.makedirs(carpeta, exist_ok=True)
+
+    ruta = os.path.join(carpeta, nombre)
+
+    img = Image.open(archivo)
+    img.thumbnail((1200,800))
+    img.save(ruta)
+
+    url = f"/static/mapas/{nombre}"
+
+    return jsonify({
+        "url": url
+    })
 @organizador_bp.route("/evento/<int:evento_id>/exportar_excel")
 def exportar_excel(evento_id):
 
