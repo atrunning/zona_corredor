@@ -1,4 +1,4 @@
-from flask import Flask, request
+flask import Flask, request
 from db import get_db_connection
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
@@ -7,7 +7,7 @@ app = Flask(__name__)
 app.secret_key = "12356"
 from routes.organizador import organizador_bp
 from routes.eventos import eventos_bp
-from flask import session, redirect
+from flask import session, redirefromct
 import re
 from routes.pagos import pagos_bp
 app.register_blueprint(pagos_bp)
@@ -339,6 +339,16 @@ def webhook_mp():
         ))
 
         conn.commit()
+
+        cursor.execute("""
+        UPDATE inscripciones
+        SET estado_pago = 'pagado'
+        WHERE id = %s
+        """, (inscripcion_id,))
+
+        conn.commit()
+
+        
         
         cursor.execute("""
         SELECT
