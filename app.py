@@ -2082,7 +2082,11 @@ def inscribirse(evento_id):
 
         if datos["incluye_remera"] == 0:
             talle_remera = None
-              
+
+        if datos["incluye_remera"] == 1 and not talle_remera:
+            cursor.close()
+            conn.close()
+            return "<h2>Debe seleccionar talle de remera.</h2>"      
 
             
         if edad_ingresada:
@@ -2511,15 +2515,23 @@ def panel_evento(evento_id):
     cursor.execute("""
     SELECT 
         SUM(CASE 
-            WHEN p.estado IN ('aprobado','pagado') 
+            WHEN p.estado IN ('aprobado','pagado')
             AND p.monto > 0
-            THEN p.monto 
-            ELSE 0 
-        END) as cobrado,
+            THEN (p.monto - IFNULL(p.comision,0))
+            ELSE 0
+        END) AS cobrado,
 
-        SUM(CASE WHEN p.estado = 'pendiente' THEN p.monto ELSE 0 END) as pendiente,
+        SUM(CASE 
+            WHEN p.estado = 'pendiente'
+            THEN (p.monto - IFNULL(p.comision,0))
+            ELSE 0
+        END) AS pendiente,
 
-        SUM(CASE WHEN p.estado = 'rechazado' THEN p.monto ELSE 0 END) as rechazado
+        SUM(CASE 
+            WHEN p.estado = 'rechazado'
+            THEN (p.monto - IFNULL(p.comision,0))
+            ELSE 0
+        END) AS rechazado
 
     FROM pagos p
     JOIN inscripciones i ON p.inscripcion_id = i.id
