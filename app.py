@@ -1189,7 +1189,7 @@ def ver_evento(evento_id):
     color:white;
     border-radius:8px;
     text-decoration:none;
-    display:{'inline-block' if evento.get('reglamento_activo') and evento.get('reglamento_archivo') else 'none'};
+    display:{'inline-block' if str(evento.get('reglamento_activo')) == '1' and evento.get('reglamento_archivo') else 'none'};
     ">
     📄 Reglamento
     </a>
@@ -1227,7 +1227,7 @@ def ver_evento(evento_id):
     color:white;
     border-radius:8px;
     text-decoration:none;
-    display:{'inline-block' if evento.get('deslinde_activo') and evento.get('deslinde_archivo') else 'none'};
+    display:{'inline-block' if str(evento.get('deslinde_activo')) == '1' and evento.get('deslinde_archivo') else 'none'};
     ">
     ⚖️ Deslinde
     </a>

@@ -1814,12 +1814,20 @@ def editar_evento(evento_id):
     # POST (GUARDAR)
     # =========================
     if request.method == "POST":
+
+        # 🔹 traer evento actual para conservar archivos existentes
+        cursor.execute("SELECT * FROM eventos WHERE id=%s", (evento_id,))
+        evento = cursor.fetchone()
+
         nombre = request.form["nombre"]
         fecha = request.form["fecha"]
         hora = request.form["hora"]
         lugar = request.form["lugar"]
         provincia = request.form["provincia"]
-        descripcion = request.form.get("descripcion","")
+        descripcion = request.form.get("descripcion", "")
+
+        archivo_reglamento = request.files.get("reglamento_pdf")
+        archivo_deslinde = request.files.get("deslinde_pdf")
 
         direccion = request.form.get("direccion")
         latitud = request.form.get("latitud")
@@ -1829,8 +1837,41 @@ def editar_evento(evento_id):
         longitud = float(longitud) if longitud not in [None, "", "None"] else None
 
         archivo = request.files.get("imagen")
-        imagen = None
+        imagen = evento.get("imagen")
 
+        # conservar valores actuales
+        reglamento = evento.get("reglamento_archivo")
+        deslinde = evento.get("deslinde_archivo")
+
+        reglamento_activo = evento.get("reglamento_activo", 0)
+        deslinde_activo = evento.get("deslinde_activo", 0)
+
+        # -------------------------
+        # DOCUMENTOS
+        # -------------------------
+        carpeta_docs = "static/documentos"
+        if not os.path.exists(carpeta_docs):
+            os.makedirs(carpeta_docs)
+
+        if archivo_reglamento and archivo_reglamento.filename != "":
+            nombre_reglamento = secure_filename(archivo_reglamento.filename)
+            ruta = os.path.join(carpeta_docs, nombre_reglamento)
+            archivo_reglamento.save(ruta)
+
+            reglamento = nombre_reglamento
+            reglamento_activo = 1
+
+        if archivo_deslinde and archivo_deslinde.filename != "":
+            nombre_deslinde = secure_filename(archivo_deslinde.filename)
+            ruta = os.path.join(carpeta_docs, nombre_deslinde)
+            archivo_deslinde.save(ruta)
+
+            deslinde = nombre_deslinde
+            deslinde_activo = 1
+
+        # -------------------------
+        # IMAGEN
+        # -------------------------
         if archivo and archivo.filename != "":
             nombre_archivo = secure_filename(archivo.filename)
 
@@ -1843,27 +1884,47 @@ def editar_evento(evento_id):
 
             imagen = nombre_archivo
 
-        if imagen:
-            cursor.execute("""
-            UPDATE eventos
-            SET nombre=%s,fecha=%s,hora=%s,lugar=%s,provincia=%s,
-                descripcion=%s,direccion=%s,latitud=%s,longitud=%s,imagen=%s
-            WHERE id=%s
-            """,(nombre,fecha,hora,lugar,provincia,descripcion,
-                 direccion,latitud,longitud,imagen,evento_id))
-        else:
-            cursor.execute("""
-            UPDATE eventos
-            SET nombre=%s,fecha=%s,hora=%s,lugar=%s,provincia=%s,
-                descripcion=%s,direccion=%s,latitud=%s,longitud=%s
-            WHERE id=%s
-            """,(nombre,fecha,hora,lugar,provincia,descripcion,
-                 direccion,latitud,longitud,evento_id))
+        # -------------------------
+        # UPDATE
+        # -------------------------
+        cursor.execute("""
+        UPDATE eventos
+        SET nombre=%s,
+            fecha=%s,
+            hora=%s,
+            lugar=%s,
+            provincia=%s,
+            descripcion=%s,
+            direccion=%s,
+            latitud=%s,
+            longitud=%s,
+            imagen=%s,
+            reglamento_archivo=%s,
+            reglamento_activo=%s,
+            deslinde_archivo=%s,
+            deslinde_activo=%s
+        WHERE id=%s
+        """, (
+            nombre,
+            fecha,
+            hora,
+            lugar,
+            provincia,
+            descripcion,
+            direccion,
+            latitud,
+            longitud,
+            imagen,
+            reglamento,
+            reglamento_activo,
+            deslinde,
+            deslinde_activo,
+            evento_id
+        ))
 
         conn.commit()
         cursor.close()
         conn.close()
-
         return f"""
         <script>
         alert("Evento actualizado");
@@ -1954,6 +2015,14 @@ def editar_evento(evento_id):
 
     <img src="/static/eventos/{evento.get('imagen') or 'logo.png'}"
     style="max-width:200px;border-radius:8px;"><br><br>
+
+    <h3>Reglamento (PDF)</h3>
+    <input type="file" name="reglamento_pdf" accept=".pdf"><br>
+    Archivo actual: {evento.get('reglamento','Sin archivo')}<br><br>
+
+    <h3>Deslinde (PDF)</h3>
+    <input type="file" name="deslinde_pdf" accept=".pdf"><br>
+    Archivo actual: {evento.get('deslinde','Sin archivo')}<br><br>
 
     <button type="submit" style="
     padding:10px 20px;
