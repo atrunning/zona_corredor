@@ -1884,13 +1884,47 @@ def inscribirse(evento_id):
         <input type="text" name="team_nuevo" placeholder="O escribir nuevo equipo"
         style="padding:10px;border:1px solid #ccc;border-radius:6px;">
 
-        <button type="submit"
-        style="margin-top:20px;padding:14px;background:#2e7d32;color:white;border:none;border-radius:8px;font-size:16px;cursor:pointer;">
+        <br><br>
+
+        <label style="display:block;font-size:14px;color:#333;margin-top:10px;">
+       <input type="checkbox"
+        id="acepta_terminos"
+        name="acepta_terminos"
+        value="1"
+        style="margin-right:8px;">
+        Acepto reglamento, deslinde de responsabilidad y términos del evento
+        </label>
+
+        <button type="submit" id="btnConfirmar" disabled
+        style="
+        margin-top:20px;
+        padding:14px;
+        background:#2e7d32;
+        color:white;
+        border:none;
+        border-radius:8px;
+        font-size:16px;
+        cursor:not-allowed;
+        opacity:0.6;
+        ">
         Confirmar inscripción
         </button>
 
-        </form>
-        </div>
+        <script>
+        document.getElementById("acepta_terminos").addEventListener("change", function(){
+            let btn = document.getElementById("btnConfirmar");
+
+            if(this.checked){
+                btn.disabled = false;
+                btn.style.opacity = "1";
+                btn.style.cursor = "pointer";
+            }else{
+                btn.disabled = true;
+                btn.style.opacity = "0.6";
+                btn.style.cursor = "not-allowed";
+            }
+        });
+        </script>
         """
 
         return salida
@@ -1900,6 +1934,15 @@ def inscribirse(evento_id):
     # --------------------------------------
     
     if accion == "confirmar":
+    
+
+        if request.form.get("acepta_terminos") != "1":
+            return """
+        <script>
+        alert("Debes aceptar los términos y condiciones.");
+        history.back();
+        </script>
+        """
 
         cupon = request.form.get("cupon", "").strip().upper()
 
