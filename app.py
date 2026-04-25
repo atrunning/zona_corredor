@@ -1056,7 +1056,7 @@ def ver_evento(evento_id):
 
     mp = cursor.fetchone()
     tiene_mp = bool(mp and mp["access_token_mp"])
-    descripcion = evento["descripcion"].replace("\n", "<br>") if evento["descripcion"] else ""
+    descripcion = evento["descripcion"] if evento["descripcion"] else ""
 
     boton_pagar = ""
 
