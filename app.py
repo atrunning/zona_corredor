@@ -2448,15 +2448,17 @@ def inscribirse(evento_id):
         INSERT INTO pagos (
             inscripcion_id,
             monto,
+            comision,
             metodo,
             estado,
             referencia_externa,
             fecha_creacion
         )
-        VALUES (%s, %s, %s, %s, %s, %s)
+        VALUES (%s,%s,%s,%s,%s,%s,%s)
         """, (
             inscripcion_id,
-            float(precio),  # después lo mejoramos
+            float(precio_final),
+            float(comision),
             "mercadopago",
             "pendiente",
             str(inscripcion_id),
