@@ -2444,6 +2444,12 @@ def inscribirse(evento_id):
         fecha_pago = datetime.now(
             ZoneInfo("America/Argentina/Buenos_Aires")
         ).strftime("%Y-%m-%d %H:%M:%S")
+
+        # 🔥 calcular comisión y total
+        precio = float(precio)
+        comision = round(precio * 0.03, 2)
+        precio_final = round(precio + comision, 2)
+
         cursor.execute("""
         INSERT INTO pagos (
             inscripcion_id,
@@ -2457,8 +2463,8 @@ def inscribirse(evento_id):
         VALUES (%s,%s,%s,%s,%s,%s,%s)
         """, (
             inscripcion_id,
-            float(precio_final),
-            float(comision),
+            precio_final,
+            comision,
             "mercadopago",
             "pendiente",
             str(inscripcion_id),
