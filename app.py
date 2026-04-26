@@ -117,12 +117,47 @@ def layout(contenido, menu=True, evento_id=None, eventos=None):
     </div>
 
     <div>
-        <a href="mailto:zonacorredor@gmail.com" style="color:white;margin-right:20px;text-decoration:none">
-            📧 zonacorredor@gmail.com
+        
+
+        
+    </div>
+        <div style="display:flex;align-items:center;gap:14px;">
+
+        <a href="/perfil" style="
+        color:white;
+        text-decoration:none;
+        padding:8px 14px;
+        background:#444;
+        border-radius:8px;
+        font-weight:bold;
+        ">
+        👤 Perfil
         </a>
 
-        <a href="/" style="color:white;margin-right:20px;text-decoration:none">Eventos</a>
-        <a href="/organizador" style="color:white;text-decoration:none">Organizadores</a>
+        <a href="mailto:zonacorredor@gmail.com" style="
+        color:#ddd;
+        text-decoration:none;
+        font-size:14px;
+        ">
+        📧 zonacorredor@gmail.com
+        </a>
+
+        <a href="/" style="
+        color:white;
+        text-decoration:none;
+        padding:6px 10px;
+        ">
+        Eventos
+        </a>
+
+        <a href="/organizador" style="
+        color:white;
+        text-decoration:none;
+        padding:6px 10px;
+        ">
+        Organizadores
+        </a>
+
     </div>
 
     </div>
@@ -145,7 +180,162 @@ def layout(contenido, menu=True, evento_id=None, eventos=None):
 
 
 from urllib.parse import urlencode
+@app.route("/perfil")
+def perfil():
 
+    if "organizador_id" not in session:
+        return redirect("/login")
+
+    return """
+    <html>
+    <body style='font-family:Arial;background:#f5f5f5;margin:0;padding:40px;'>
+
+    <div style='max-width:700px;margin:auto;background:white;
+    padding:30px;border-radius:12px;
+    box-shadow:0 4px 15px rgba(0,0,0,0.08);'>
+
+        <h1 style='margin-top:0;'>👤 Mi Perfil</h1>
+
+        <p><b>Datos de cuenta</b></p>
+
+        <p>✉️ Email: zonacorredor@gmail.com</p>
+        <p>🏁 Tipo: Organizador</p>
+
+        <hr style='margin:25px 0'>
+
+        <a href="/editar_perfil" style="
+        display:inline-block;
+        padding:12px 18px;
+        background:#1976d2;
+        color:white;
+        text-decoration:none;
+        border-radius:8px;
+        margin-right:10px;
+        ">
+        ✏️ Editar datos
+        </a>
+
+        <a href="/cambiar_password" style="
+        display:inline-block;
+        padding:12px 18px;
+        background:#444;
+        color:white;
+        text-decoration:none;
+        border-radius:8px;
+        ">
+        🔒 Cambiar contraseña
+        </a>
+
+    </div>
+
+    </body>
+    </html>
+    """
+@app.route("/editar_perfil", methods=["GET","POST"])
+def editar_perfil():
+
+    if "organizador_id" not in session:
+        return redirect("/login")
+
+    org_id = session["organizador_id"]
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    if request.method == "POST":
+
+        nombre = request.form["nombre"]
+        email = request.form["email"]
+        contacto = request.form["contacto"]
+        telefono = request.form["telefono"]
+
+        cursor.execute("""
+        UPDATE organizadores
+        SET nombre=%s,
+            email=%s,
+            contacto=%s,
+            telefono=%s
+        WHERE id=%s
+        """, (
+            nombre,
+            email,
+            contacto,
+            telefono,
+            org_id
+        ))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return redirect("/editar_perfil?ok=1")
+    
+    cursor.execute("""
+    SELECT *
+    FROM organizadores
+    WHERE id=%s
+    """, (org_id,))
+
+    org = cursor.fetchone()
+
+    cursor.close()
+    conn.close()
+    guardado = request.args.get("ok")
+    
+    return f"""
+    <html>
+    <body style="font-family:Arial;background:#f5f5f5;padding:40px;">
+
+    <div style="
+    max-width:700px;
+    margin:auto;
+    background:white;
+    padding:30px;
+    border-radius:12px;
+    box-shadow:0 4px 15px rgba(0,0,0,0.08);
+    ">
+
+    <h1>✏️ Editar Perfil</h1>
+
+    <form method="POST">
+
+        <label>Nombre</label><br>
+        <input name="nombre" value="{org['nombre']}" style="width:100%;padding:10px;"><br><br>
+
+        <label>Email</label><br>
+        <input name="email" value="{org['email']}" style="width:100%;padding:10px;"><br><br>
+
+        <label>Contacto</label><br>
+        <input name="contacto" value="{org.get('contacto','')}" style="width:100%;padding:10px;"><br><br>
+
+        <label>Teléfono</label><br>
+        <input name="telefono" value="{org.get('telefono','')}" style="width:100%;padding:10px;"><br><br>
+
+        <button type="submit" style="
+        background:#1976d2;
+        color:white;
+        border:none;
+        padding:12px 20px;
+        border-radius:8px;
+        cursor:pointer;
+        ">
+        💾 Guardar cambios
+        </button>
+
+        <a href="/perfil" style="
+        margin-left:10px;
+        text-decoration:none;
+        color:#333;
+        ">
+        Volver
+        </a>
+        {"<div style='background:#dff0d8;color:#2e7d32;padding:12px 15px;border-radius:8px;margin-bottom:20px;font-weight:bold;'>✅ Datos actualizados correctamente</div>" if guardado else ""}
+        
+    </form>
+
+    </div>
+    </body>
+    </html>
+    """
 @app.route("/conectar_mp")
 def conectar_mp():
     organizador_id = session.get("organizador_id")
@@ -164,7 +354,104 @@ def conectar_mp():
     url = "https://auth.mercadopago.com.ar/authorization?" + urlencode(params)
 
     return redirect(url)
+@app.route("/cambiar_password", methods=["GET","POST"])
+def cambiar_password():
 
+    if "organizador_id" not in session:
+        return redirect("/login")
+
+    org_id = session["organizador_id"]
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    mensaje = ""
+
+    if request.method == "POST":
+
+        actual = request.form["actual"]
+        nueva = request.form["nueva"]
+        repetir = request.form["repetir"]
+
+        cursor.execute("""
+        SELECT password
+        FROM organizadores
+        WHERE id=%s
+        """, (org_id,))
+
+        org = cursor.fetchone()
+
+        if actual != org["password"]:
+            mensaje = "❌ Contraseña actual incorrecta"
+
+        elif nueva != repetir:
+            mensaje = "❌ Las nuevas contraseñas no coinciden"
+
+        elif len(nueva) < 4:
+            mensaje = "❌ La nueva contraseña es muy corta"
+
+        else:
+            cursor.execute("""
+            UPDATE organizadores
+            SET password=%s
+            WHERE id=%s
+            """, (nueva, org_id))
+
+            conn.commit()
+            mensaje = "✅ Contraseña actualizada correctamente"
+
+    cursor.close()
+    conn.close()
+
+    return f"""
+    <html>
+    <body style="font-family:Arial;background:#f5f5f5;padding:40px;">
+
+    <div style="
+    max-width:600px;
+    margin:auto;
+    background:white;
+    padding:30px;
+    border-radius:12px;
+    box-shadow:0 4px 15px rgba(0,0,0,0.08);
+    ">
+
+    <h1>🔒 Cambiar contraseña</h1>
+
+    {"<div style='background:#eef;padding:12px;border-radius:8px;margin-bottom:20px;'>" + mensaje + "</div>" if mensaje else ""}
+
+    <form method="POST">
+
+        <label>Contraseña actual</label><br>
+        <input type="password" name="actual" style="width:100%;padding:10px;"><br><br>
+
+        <label>Nueva contraseña</label><br>
+        <input type="password" name="nueva" style="width:100%;padding:10px;"><br><br>
+
+        <label>Repetir nueva contraseña</label><br>
+        <input type="password" name="repetir" style="width:100%;padding:10px;"><br><br>
+
+        <button type="submit" style="
+        background:#333;
+        color:white;
+        border:none;
+        padding:12px 20px;
+        border-radius:8px;
+        cursor:pointer;
+        ">
+        🔒 Guardar contraseña
+        </button>
+
+        <a href="/perfil" style="margin-left:15px;text-decoration:none;color:#333;">
+        Volver
+        </a>
+
+    </form>
+
+    </div>
+    </body>
+    </html>
+    """
 @app.route("/mp_callback")
 def mp_callback():
     code = request.args.get("code")
