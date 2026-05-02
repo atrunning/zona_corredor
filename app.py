@@ -592,38 +592,34 @@ def webhook_mp():
         from zoneinfo import ZoneInfo
 
         comprobante = info.get("id")
-        monto = float(info.get("transaction_amount", 0))
+
+        # 💰 MONTO REAL
+        monto_bruto = float(info.get("transaction_amount", 0))
+
+        # calcular neto y comisión
+        monto_neto = round(monto_bruto / 1.03, 2)
+        comision = round(monto_bruto - monto_neto, 2)
 
         fecha_mp = info.get("date_approved")
+
         dt = datetime.fromisoformat(fecha_mp.replace("Z", "+00:00"))
         fecha_arg = dt.astimezone(
             ZoneInfo("America/Argentina/Buenos_Aires")
         )
-        
 
-        # 🔒 Evitar reprocesar pagos ya aprobados
-        cursor.execute("""
-        SELECT estado FROM pagos
-        WHERE inscripcion_id = %s
-        """, (inscripcion_id,))
-
-        pago_actual = cursor.fetchone()
-
-        if pago_actual and pago_actual["estado"] == "aprobado":
-            cursor.close()
-            conn.close()
-            return "ok", 200
-        
-        # 🔥 NO PISAR referencia_externa
         cursor.execute("""
         UPDATE pagos
         SET estado = 'aprobado',
             monto = %s,
+            comision = %s,
+            referencia_externa = %s,
             fecha_confirmacion = %s
         WHERE inscripcion_id = %s
         AND estado = 'pendiente'
         """, (
-            monto,
+            monto_neto,   # 👈 lo que gana el organizador
+            comision,     # 👈 comisión real
+            comprobante,
             fecha_arg.strftime("%Y-%m-%d %H:%M:%S"),
             inscripcion_id
         ))
