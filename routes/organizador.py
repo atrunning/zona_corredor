@@ -7,6 +7,7 @@ from PIL import Image
 from flask import send_file
 from openpyxl import Workbook
 import io
+from flask import session, redirect
 
 organizador_bp = Blueprint("organizador", __name__)
 
@@ -300,6 +301,25 @@ def ver_inscriptos(evento_id):
     """     
     
     return layout(salida)
+@organizador_bp.route("/evento/<int:evento_id>/talles_form")
+def talles_form(evento_id):
+
+    salida = f"""
+    <h2>👕 Configurar talles</h2>
+
+    <form method="POST" action="/evento/{evento_id}/talles">
+
+    <textarea name="talles" style="width:300px;height:80px"
+    placeholder="XS,S,M,L,XL,XXL"></textarea>
+
+    <br><br>
+
+    <button>Guardar talles</button>
+
+    </form>
+    """
+
+    return layout(salida, evento_id=evento_id)
 @organizador_bp.route("/corredores")
 def ver_corredores():
 
@@ -807,7 +827,9 @@ def toggle_inscripciones(evento_id):
     <script>
     window.location.href="/evento/{evento_id}/panel"
     </script>
+ 
     """
+
 @organizador_bp.route("/evento/<int:evento_id>/distancias", methods=["GET","POST"])
 def administrar_distancias(evento_id):
 
@@ -1003,7 +1025,30 @@ def administrar_distancias(evento_id):
 
     salida += "</table>"
     return layout(salida, evento_id=evento_id)
+@organizador_bp.route("/evento/<int:evento_id>/talles", methods=["POST"])
+def guardar_talles(evento_id):
 
+    if "organizador_id" not in session:
+        return redirect("/login")
+    
+    talles = request.form.get("talles", "")
+    lista = [t.strip().upper() for t in talles.split(",") if t.strip()]
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("DELETE FROM talles_evento WHERE evento_id = %s", (evento_id,))
+
+    for t in lista:
+        cursor.execute("""
+        INSERT INTO talles_evento (evento_id, talle)
+        VALUES (%s, %s)
+        """, (evento_id, t))
+
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return redirect(f"/evento/{evento_id}/talles_form")
     
 
 @organizador_bp.route("/inscripcion/<numero>", methods=["GET","POST"])
@@ -1404,16 +1449,28 @@ def editar_inscripcion(numero):
 
     Strava<br>
     <input type="text" name="strava" value="{ins.get('strava','')}"><br><br>
+    """
+    
+    print("EVENTO INS:", ins["evento_id"])
+    cursor.execute("""
+    SELECT talle FROM talles_evento
+    WHERE evento_id = %s
+    ORDER BY talle
+    """, (ins["evento_id"],))
 
-    Talle Remera<br>
-    <select name="talle_remera">
-        <option value="">Seleccionar</option>
-        <option value="S" {"selected" if ins.get("talle_remera")=="S" else ""}>S</option>
-        <option value="M" {"selected" if ins.get("talle_remera")=="M" else ""}>M</option>
-        <option value="L" {"selected" if ins.get("talle_remera")=="L" else ""}>L</option>
-        <option value="XL" {"selected" if ins.get("talle_remera")=="XL" else ""}>XL</option>
-    </select><br><br>
+    talles = cursor.fetchall()
 
+    salida += '<select name="talle_remera">'
+    salida += '<option value="">Seleccionar</option>'
+
+    for t in talles:
+        selected = "selected" if ins.get("talle_remera") == t["talle"] else ""
+        salida += f"<option value='{t['talle']}' {selected}>{t['talle']}</option>"
+
+    salida += '</select><br><br>'
+
+    # 👇 ACÁ ABRÍ DE NUEVO
+    salida += f"""
     Team / Equipo<br>
 
     <input type="text" name="team_input" id="team_input"
@@ -2478,6 +2535,7 @@ def exportar_excel(evento_id):
         as_attachment=True,
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
 @organizador_bp.route("/evento/<int:evento_id>/exportar_seguro")
 def exportar_seguro(evento_id):
 

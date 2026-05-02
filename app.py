@@ -45,7 +45,7 @@ app.register_blueprint(eventos_bp)
 print("🔥 VERSION NUEVA 🔥")
 def layout(contenido, menu=True, evento_id=None, eventos=None):
 
-
+    salida = ""
     menu_html = ""
 
     if menu:
@@ -68,6 +68,7 @@ def layout(contenido, menu=True, evento_id=None, eventos=None):
             <a href="/evento/{evento_id}/exportar">Exportar inscriptos</a><br><br>
             <a href="/evento/{evento_id}/exportar_seguro">Exportar seguro</a><br><br>
             <a href="/evento/{evento_id}/reporte_remeras">Reporte de remeras</a><br><br>
+            <a href="/evento/{evento_id}/talles_form">👕 Configurar talles</a><br><br>
 
             <hr>
 
@@ -78,8 +79,7 @@ def layout(contenido, menu=True, evento_id=None, eventos=None):
 
         menu_html += """
         
-
-        
+               
 
         </div>
         """
@@ -544,39 +544,34 @@ def webhook_mp():
 
     payment_id = data["data"]["id"]
 
+    # 🔥 PRIMERO consultar MP
+    sdk = mercadopago.SDK(os.getenv("MP_ACCESS_TOKEN"))
+    payment = sdk.payment().get(payment_id)
+    info = payment["response"]
+
+    print("PAGO INFO:", info)
+
+    # 🔥 obtener inscripcion correcta
+    inscripcion_id = info.get("external_reference")
+
+    if not inscripcion_id:
+        return "ok", 200
+
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
-    # Buscar inscripción y token correcto del organizador
     cursor.execute("""
     SELECT
         i.id AS inscripcion_id,
         o.access_token_mp
-    FROM pagos p
-    JOIN inscripciones i ON i.id = p.inscripcion_id
+    FROM inscripciones i
     JOIN eventos e ON e.id = i.evento_id
     JOIN organizadores o ON o.id = e.organizador_id
-    WHERE p.referencia_externa = %s
+    WHERE i.id = %s
     LIMIT 1
-    """, (str(payment_id),))
+    """, (inscripcion_id,))
 
     fila = cursor.fetchone()
-
-    # Si no encontró por payment_id, buscar luego por pagos pendientes
-    if not fila:
-        cursor.execute("""
-        SELECT
-            i.id AS inscripcion_id,
-            o.access_token_mp
-        FROM pagos p
-        JOIN inscripciones i ON i.id = p.inscripcion_id
-        JOIN eventos e ON e.id = i.evento_id
-        JOIN organizadores o ON o.id = e.organizador_id
-        WHERE p.estado = 'pendiente'
-        ORDER BY p.id DESC
-        LIMIT 1
-        """)
-        fila = cursor.fetchone()
 
     if not fila or not fila["access_token_mp"]:
         cursor.close()
@@ -586,17 +581,13 @@ def webhook_mp():
     inscripcion_id = fila["inscripcion_id"]
     access_token = fila["access_token_mp"]
 
-    # Consultar pago con token correcto
+    # 🔥 consultar con token correcto
     sdk = mercadopago.SDK(access_token)
-
     payment = sdk.payment().get(payment_id)
     info = payment["response"]
 
-    print("PAGO INFO:", info)
-
     if info.get("status") == "approved":
 
-        
         from datetime import datetime
         from zoneinfo import ZoneInfo
 
@@ -604,23 +595,35 @@ def webhook_mp():
         monto = float(info.get("transaction_amount", 0))
 
         fecha_mp = info.get("date_approved")
-
         dt = datetime.fromisoformat(fecha_mp.replace("Z", "+00:00"))
         fecha_arg = dt.astimezone(
             ZoneInfo("America/Argentina/Buenos_Aires")
         )
+        
 
+        # 🔒 Evitar reprocesar pagos ya aprobados
+        cursor.execute("""
+        SELECT estado FROM pagos
+        WHERE inscripcion_id = %s
+        """, (inscripcion_id,))
+
+        pago_actual = cursor.fetchone()
+
+        if pago_actual and pago_actual["estado"] == "aprobado":
+            cursor.close()
+            conn.close()
+            return "ok", 200
+        
+        # 🔥 NO PISAR referencia_externa
         cursor.execute("""
         UPDATE pagos
         SET estado = 'aprobado',
             monto = %s,
-            referencia_externa = %s,
             fecha_confirmacion = %s
         WHERE inscripcion_id = %s
         AND estado = 'pendiente'
         """, (
             monto,
-            comprobante,
             fecha_arg.strftime("%Y-%m-%d %H:%M:%S"),
             inscripcion_id
         ))
@@ -634,9 +637,10 @@ def webhook_mp():
         """, (inscripcion_id,))
 
         conn.commit()
+        # -------------------------
+        # ENVIAR MAIL CONFIRMACION
+        # -------------------------
 
-        
-        
         cursor.execute("""
         SELECT
             p.email,
@@ -2143,21 +2147,32 @@ def inscribirse(evento_id):
         <input type="text" name="facebook" placeholder="Facebook"
         style="padding:10px;border:1px solid #ccc;border-radius:6px;">
         """
-
+        print("FORM:", request.form)
         # 👕 Remera
         if str(distancia.get("incluye_remera")) == "1":
-            salida += """
-            <h3>Talle de remera</h3>
-            <select name="remera" required style="padding:10px;border-radius:6px;">
-                <option value="">Seleccionar</option>
-                <option>XS</option>
-                <option>S</option>
-                <option>M</option>
-                <option>L</option>
-                <option>XL</option>
-                <option>XXL</option>
-            </select>
-            """
+
+            conn = get_db_connection()
+            cursor = conn.cursor(dictionary=True)
+
+            cursor.execute("""
+            SELECT talle FROM talles_evento
+            WHERE evento_id = %s
+            ORDER BY FIELD(talle,'XS','S','M','L','XL','XXL','XXXL')
+            """, (evento_id,))
+
+            talles = cursor.fetchall()
+
+            cursor.close()
+            conn.close()
+            
+            salida += '<h3>Talle de remera</h3>'
+            salida += '<select name="talle_remera" required style="padding:10px;border-radius:6px;">'
+            salida += '<option value="">Seleccionar</option>'
+
+            for t in talles:
+                salida += f"<option value='{t['talle']}'>{t['talle']}</option>"
+
+            salida += '</select>'
 
         # 👥 Team
         salida += '<h3>Equipo</h3>'
@@ -2344,12 +2359,8 @@ def inscribirse(evento_id):
                 </div>
                 """
 
-        cursor.close()
-        conn.close() 
-
         
-        remera = request.form.get("remera")
-        
+               
         persona_id = request.form["persona_id"]
         dni = request.form["dni"]
 
@@ -2397,7 +2408,7 @@ def inscribirse(evento_id):
         if team_id == "":
             team_id = None
 
-        talle_remera = request.form.get("remera")
+        talle_remera = request.form.get("talle_remera", "").strip() 
 
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
@@ -2439,8 +2450,7 @@ def inscribirse(evento_id):
                 </script>
                 """
 
-        conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        
     
         
         
@@ -3063,7 +3073,9 @@ def panel_evento(evento_id):
     cursor2.close()
     conn2.close()
     return layout(salida, evento_id=evento_id, eventos=eventos)
-    
+
+
+    return redirect(f"/evento/{evento_id}/panel")    
 @app.route("/evento/<int:evento_id>/editar_distancia/<int:distancia_id>", methods=["GET","POST"])
 def editar_distancia(evento_id, distancia_id):
 
