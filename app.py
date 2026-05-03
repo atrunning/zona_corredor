@@ -3263,7 +3263,8 @@ def editar_evento(evento_id):
 
         nombre = request.form["nombre"]
         fecha = request.form["fecha"]
-        hora = request.form["hora"]
+        hora_form = request.form.get("hora")
+        hora = hora_form if hora_form else evento.get("hora")
         lugar = request.form["lugar"]
         provincia = request.form["provincia"]
         direccion = request.form["direccion"]

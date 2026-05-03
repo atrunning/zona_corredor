@@ -632,7 +632,8 @@ def nuevo_evento():
     <br><br>
 
     Hora<br>
-    <input type="time" name="hora">
+    <input type="time" name="hora"
+    value="{{ evento.hora[:5] if evento.hora else '' }}">
 
     <br><br>
 
@@ -1878,7 +1879,8 @@ def editar_evento(evento_id):
 
         nombre = request.form["nombre"]
         fecha = request.form["fecha"]
-        hora = request.form["hora"]
+        hora_form = request.form.get("hora")
+        hora = hora_form if hora_form else evento.get("hora")
         lugar = request.form["lugar"]
         provincia = request.form["provincia"]
         descripcion = request.form.get("descripcion", "")
@@ -1929,18 +1931,16 @@ def editar_evento(evento_id):
         # -------------------------
         # IMAGEN
         # -------------------------
-        if archivo and archivo.filename != "":
+        if archivo and archivo.filename and archivo.filename.strip() != "":
             nombre_archivo = secure_filename(archivo.filename)
 
             carpeta = "static/eventos"
-            if not os.path.exists(carpeta):
-                os.makedirs(carpeta)
+            os.makedirs(carpeta, exist_ok=True)
 
             ruta = os.path.join(carpeta, nombre_archivo)
             archivo.save(ruta)
 
             imagen = nombre_archivo
-
         # -------------------------
         # UPDATE
         # -------------------------
