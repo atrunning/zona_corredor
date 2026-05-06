@@ -1126,6 +1126,14 @@ def editar_inscripcion(numero):
         dorsal = request.form.get("dorsal") or None
         distancia_id = request.form.get("distancia_id")
 
+        cursor.execute("""
+        SELECT distancia_id
+        FROM inscripciones
+        WHERE numero_inscripcion=%s
+        """, (numero,))
+
+        ins = cursor.fetchone()
+
         if not distancia_id:
             distancia_id = ins["distancia_id"]
         
@@ -1195,12 +1203,11 @@ def editar_inscripcion(numero):
         """, (dorsal, distancia_id, talle, numero))
 
         
-        cursor.close()
-        conn.close()
+        conn.commit()
 
         tab = request.args.get("tab") or request.form.get("tab") or "resumen"
         return redirect(f"/inscripcion/{numero}?ok=1&tab={tab}")
-    
+            
     # -------------------------
     # CARGAR DATOS INSCRIPCION
     # -------------------------
@@ -1289,8 +1296,7 @@ def editar_inscripcion(numero):
         conn.close()
         return layout("<h2>Inscripción no encontrada</h2>")
 
-    cursor.close()
-    conn.close()
+    
 
     # -------------------------
     # CONSTRUIR LISTA TEAMS
