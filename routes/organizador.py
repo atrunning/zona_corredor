@@ -40,7 +40,7 @@ def ver_inscriptos(evento_id):
 
         COUNT(i.id) AS total,
 
-        SUM(CASE WHEN i.estado_pago = 'pagado' THEN 1 ELSE 0 END) AS pagados,
+        SUM(CASE WHEN i.estado_pago IN ('pagado','bonificado') THEN 1 ELSE 0 END) AS pagados,
         SUM(CASE WHEN i.estado_pago = 'pendiente' THEN 1 ELSE 0 END) AS pendientes,
         SUM(CASE WHEN i.estado_pago = 'vencido' THEN 1 ELSE 0 END) AS vencidos
 
@@ -128,7 +128,7 @@ def ver_inscriptos(evento_id):
         padding:15px;
         border-radius:10px;
         width:220px;
-        border-left:6px solid #1976d2a
+        border-left:6px solid #1976d2;
         '>
         <b>{d['nombre']}</b><br><br>
 
@@ -160,6 +160,28 @@ def ver_inscriptos(evento_id):
     # -----------------------
     # TABLA INSCRIPTOS
     # -----------------------
+    salida += f"""
+        <div style="display:flex;justify-content:space-between;align-items:center;margin:20px 0;">
+
+            <h2>Listado de inscriptos</h2>
+
+            <a href="/evento/{evento_id}/inscripcion_manual">
+                <button style="
+                    background:#2e7d32;
+                    color:white;
+                    border:none;
+                    padding:12px 18px;
+                    border-radius:8px;
+                    font-weight:bold;
+                    cursor:pointer;
+                ">
+                    ➕ Inscripción nueva
+                </button>
+            </a>
+
+        </div>
+        """
+
     salida += "<h2>Listado de inscriptos</h2>"
 
     salida += """
@@ -220,6 +242,8 @@ def ver_inscriptos(evento_id):
             estado = "<span style='background:#4caf50;color:white;padding:4px 8px;border-radius:4px'>Pagado</span>"
         elif estado_db == "pendiente":
             estado = "<span style='background:#ff9800;color:white;padding:4px 8px;border-radius:4px'>Pendiente</span>"
+        elif estado_db == "bonificado":
+             estado = "<span style='background:#2196F3;color:white;padding:4px 8px;border-radius:4px'>🎁 Bonificado</span>"    
         elif estado_db == "vencido":
             estado = "<span style='background:#f44336;color:white;padding:4px 8px;border-radius:4px'>Vencido</span>"
         else:
@@ -301,6 +325,153 @@ def ver_inscriptos(evento_id):
     """     
     
     return layout(salida)
+@organizador_bp.route("/evento/<int:evento_id>/inscripcion_manual", methods=["GET","POST"])
+def inscripcion_manual(evento_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    # =========================
+    # POST → guardar inscripción
+    # =========================
+    if request.method == "POST":
+
+        dni = request.form.get("dni")
+        nombre = request.form.get("nombre")
+        apellido = request.form.get("apellido")
+        email = request.form.get("email")
+        celular = request.form.get("celular")
+        fecha_nac = request.form.get("fecha_nac") or "2000-01-01"
+        distancia_id = request.form.get("distancia_id")
+
+        # Buscar persona
+        cursor.execute("SELECT id FROM personas WHERE dni=%s", (dni,))
+        p = cursor.fetchone()
+
+        if p:
+            persona_id = p["id"]
+
+            cursor.execute("""
+                UPDATE personas
+                SET nombre=%s, apellido=%s, email=%s, celular=%s
+                WHERE id=%s
+            """, (nombre, apellido, email, celular, persona_id))
+        else:
+            cursor.execute("""
+                INSERT INTO personas (nombre, apellido, dni, email, celular, fecha_nac)
+                VALUES (%s,%s,%s,%s,%s,%s)
+            """, (nombre, apellido, dni, email, celular, "2000-01-01"))
+
+            persona_id = cursor.lastrowid
+
+        cursor.execute("""
+            SELECT id FROM inscripciones
+            WHERE persona_id=%s AND evento_id=%s
+        """, (persona_id, evento_id))
+
+        if cursor.fetchone():
+            cursor.close()
+            conn.close()
+            return "⚠️ Esta persona ya está inscripta en este evento"    
+
+        # Crear inscripción SIN numero primero
+        cursor.execute("""
+            INSERT INTO inscripciones
+            (persona_id, evento_id, distancia_id, estado_pago, fecha_inscripcion)
+            VALUES (%s,%s,%s,'pendiente',NOW())
+        """, (persona_id, evento_id, distancia_id))
+
+        inscripcion_id = cursor.lastrowid
+
+        # Generar numero seguro (único)
+        numero = f"{evento_id}-{str(inscripcion_id).zfill(8)}"
+
+        # Actualizar numero_inscripcion
+        cursor.execute("""
+            UPDATE inscripciones
+            SET numero_inscripcion=%s
+            WHERE id=%s
+        """, (numero, inscripcion_id))
+
+        conn.commit()
+
+        cursor.close()
+        conn.close()
+
+        return redirect(f"/evento/{evento_id}/inscriptos")
+        
+
+    # =========================
+    # GET → mostrar formulario
+    # =========================
+    cursor.execute("""
+        SELECT id, nombre, precio
+        FROM distancias
+        WHERE evento_id = %s AND activo = 1
+    """, (evento_id,))
+
+    distancias = cursor.fetchall()
+
+    opciones = ""
+    for d in distancias:
+        opciones += f"<option value='{d['id']}'>{d['nombre']} - ${d['precio']}</option>"
+
+    cursor.close()
+    conn.close()
+
+    return layout(f"""
+    <h2>➕ Inscripción manual</h2>
+
+    <form method="POST">
+
+    DNI<br>
+    <input name="dni"><br><br>
+
+    Nombre<br>
+    <input name="nombre"><br><br>
+
+    Apellido<br>
+    <input name="apellido"><br><br>
+
+    Email<br>
+    <input name="email"><br><br>
+
+    Celular<br>
+    <input name="celular"><br><br>
+
+    Distancia<br>
+    <select name="distancia_id">
+    {opciones}
+    </select><br><br>
+
+    <button>Guardar</button>
+
+    </form>
+
+    <script>
+    document.querySelector("input[name='dni']").addEventListener("blur", function(){{
+
+        let dni = this.value.trim()
+
+        if(!dni) return
+
+        fetch("/buscar_persona?dni=" + dni)
+        .then(r => r.json())
+        .then(data => {{
+
+            if(data && data.nombre){{
+
+                document.querySelector("[name='nombre']").value = data.nombre || ""
+                document.querySelector("[name='apellido']").value = data.apellido || ""
+                document.querySelector("[name='email']").value = data.email || ""
+                document.querySelector("[name='celular']").value = data.celular || ""
+
+            }}
+
+        }})
+    }})
+    </script>
+    """)
 @organizador_bp.route("/evento/<int:evento_id>/talles_form")
 def talles_form(evento_id):
 
@@ -1552,6 +1723,9 @@ def editar_inscripcion(numero):
             elif p['estado'] == "pendiente":
                 estado_texto = "Pendiente"
                 estado_clase = "background:#ff9800;color:white;padding:3px 6px;border-radius:4px"
+            elif p['estado'] == "bonificado":
+                estado_texto = "🎁 Bonificado"
+                estado_clase = "background:#2196F3;color:white;padding:3px 6px;border-radius:4px"    
 
             f_creacion = p['fecha_creacion'].strftime("%d/%m/%Y %H:%M") if p['fecha_creacion'] else "-"
             f_confirma = p['fecha_confirmacion'].strftime("%d/%m/%Y %H:%M") if p['fecha_confirmacion'] else "-"
@@ -1754,16 +1928,15 @@ def pantalla_pago(numero):
 
         cursor.execute("""
         UPDATE inscripciones
-        SET estado_pago='pagado'
+        SET estado_pago=%s
         WHERE id=%s
-        """, (inscripcion_id))
-
+        """, (estado, inscripcion_id))
         conn.commit()
 
         from flask import redirect
         return redirect(f"/inscripcion/{numero}?ok=1&tab=pago")
     
-    
+    print("HTML NUEVOOOOO")
     return layout(f"""
     <h2>Registrar pago</h2>
 
@@ -1775,9 +1948,13 @@ def pantalla_pago(numero):
     <input type="number" name="monto" value="{float(info['precio'])}"><br><br>
 
     Estado<br>
+
     <select name="estado">
-        <option value="pendiente">Pendiente</option>
-        <option value="pagado">Pagado</option>
+    
+        <option value="pendiente">PENDIENTE </option>
+        <option value="pagado">PAGADO </option>
+        <option value="bonificado">BONIFICADO </option>
+
     </select><br><br>
 
     Metodo<br>
@@ -1851,6 +2028,10 @@ def editar_pago(pago_id):
     <select name="estado">
         <option value="pendiente" {"selected" if pago['estado']=="pendiente" else ""}>Pendiente</option>
         <option value="pagado" {"selected" if pago['estado'] in ['pagado','aprobado'] else ""}>Pagado</option>
+        <option value="bonificado"
+        {"selected" if pago['estado']=="bonificado" else ""}>
+        Bonificado
+        </option>
     </select><br><br>
 
     Método<br>
@@ -2273,6 +2454,10 @@ def subir_imagen():
 
     url = f"/static/mapas/{nombre}"
 
+    return jsonify({
+        "url": url
+    })
+
     # ESTE JSON ES EL QUE CKEDITOR ESPERA
     func_num = request.args.get("CKEditorFuncNum")
 
@@ -2337,6 +2522,7 @@ def pantalla_exportar(evento_id):
     <select name="estado">
         <option value="">Todos</option>
         <option value="pagado">Pagados</option>
+        <option value="bonificado">Bonificados</option>
         <option value="pendiente">Pendientes</option>
     </select><br><br>
 
