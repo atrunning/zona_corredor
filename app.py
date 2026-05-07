@@ -42,7 +42,7 @@ def slugify(texto):
 
 app.register_blueprint(organizador_bp)
 app.register_blueprint(eventos_bp)
-print("🔥 VERSION NUEVA 🔥")
+print("🔥 VERSION NUEVA 1 🔥")
 def layout(contenido, menu=True, evento_id=None, eventos=None):
 
     salida = ""
@@ -838,6 +838,21 @@ def pagar_evento(evento_id):
         if precio == 0:
             estado_texto = "💰 Inscripción gratuita ✅"
             boton = ""
+        elif estado == "bonificado":
+            estado_texto = """
+            <span style="
+                background:#2196F3;
+                color:white;
+                padding:8px 16px;
+                border-radius:10px;
+                font-weight:bold;
+                display:inline-block;
+                font-size:16px;
+            ">
+            🎁 BONIFICADO
+            </span>
+            """
+            boton = ""
 
         elif estado == "pagado":
             estado_texto = "💰 Pago confirmado ✅"
@@ -861,7 +876,7 @@ def pagar_evento(evento_id):
                 </button>
             </a>
             """
-
+       
         salida += f"""
         <div style="
         max-width:420px;
