@@ -383,6 +383,28 @@ def inscripcion_manual(evento_id):
 
         inscripcion_id = cursor.lastrowid
 
+        cursor.execute("""
+        SELECT *
+        FROM distancia_campos
+        WHERE distancia_id = %s
+        """, (distancia_id,))
+
+        campos = cursor.fetchall()
+
+        for campo in campos:
+
+            valor = request.form.get(f"campo_{campo['id']}")
+
+            cursor.execute("""
+            INSERT INTO inscripcion_respuestas
+            (inscripcion_id, campo_id, valor)
+            VALUES (%s,%s,%s)
+            """, (
+                inscripcion_id,
+                campo["id"],
+                valor
+            ))
+
         # Generar numero seguro (único)
         numero = f"{evento_id}-{str(inscripcion_id).zfill(8)}"
 
@@ -444,33 +466,109 @@ def inscripcion_manual(evento_id):
     {opciones}
     </select><br><br>
 
+    <div id="campos-extra"></div>
+
     <button>Guardar</button>
 
     </form>
 
     <script>
-    document.querySelector("input[name='dni']").addEventListener("blur", function(){{
+document.querySelector("input[name='dni']").addEventListener("blur", function(){{
 
-        let dni = this.value.trim()
+    let dni = this.value.trim()
 
-        if(!dni) return
+    if(!dni) return
 
-        fetch("/buscar_persona?dni=" + dni)
-        .then(r => r.json())
-        .then(data => {{
+    fetch("/buscar_persona?dni=" + dni)
+    .then(r => r.json())
+    .then(data => {{
 
-            if(data && data.nombre){{
+        if(data && data.nombre){{
 
-                document.querySelector("[name='nombre']").value = data.nombre || ""
-                document.querySelector("[name='apellido']").value = data.apellido || ""
-                document.querySelector("[name='email']").value = data.email || ""
-                document.querySelector("[name='celular']").value = data.celular || ""
+            document.querySelector("[name='nombre']").value = data.nombre || ""
+            document.querySelector("[name='apellido']").value = data.apellido || ""
+            document.querySelector("[name='email']").value = data.email || ""
+            document.querySelector("[name='celular']").value = data.celular || ""
 
+        }}
+
+    }})
+}})
+</script>
+
+<script>
+
+async function cargarCampos(){{
+
+    let distancia = document.querySelector("[name='distancia_id']").value
+
+    let contenedor = document.getElementById("campos-extra")
+
+    contenedor.innerHTML = ""
+
+    let resp = await fetch(`/distancia/${{distancia}}/campos_json`)
+
+    let campos = await resp.json()
+    console.log(campos)
+    campos.forEach(campo => {{
+
+        let html = `<div style="margin-bottom:15px">`
+
+        html += `<label>${{campo.nombre}}</label><br>`
+
+        if(campo.tipo == "texto"){{
+
+            html += `
+            <input
+                type="text"
+                name="campo_${{campo.id}}"
+                ${{campo.obligatorio ? "required" : ""}}
+            >
+            `
+        }}
+
+        if(campo.tipo == "select"){{
+
+            html += `
+            <select
+                name="campo_${{campo.id}}"
+                ${{campo.obligatorio ? "required" : ""}}
+            >
+            `
+
+            html += `<option value="">Seleccionar</option>`
+
+            if(campo.opciones){{
+
+                campo.opciones.split(",").forEach(op => {{
+
+                    html += `
+                    <option value="${{op.trim()}}">
+                        ${{op.trim()}}
+                    </option>
+                    `
+                }})
             }}
 
-        }})
+            html += `</select>`
+        }}
+
+        html += `</div>`
+
+        contenedor.innerHTML += html
+
     }})
-    </script>
+
+}}
+
+document
+.querySelector("[name='distancia_id']")
+.addEventListener("change", cargarCampos)
+
+window.addEventListener("load", cargarCampos)
+
+</script>
+    
     """)
 @organizador_bp.route("/evento/<int:evento_id>/talles_form")
 def talles_form(evento_id):
@@ -1072,7 +1170,7 @@ def administrar_distancias(evento_id):
             edad_min,
             edad_max
         ))
-
+        
         conn.commit()
 
         return redirect(request.url)
@@ -1136,7 +1234,7 @@ def administrar_distancias(evento_id):
 
     Edad máxima<br>
     <input type="number" name="edad_max"><br><br>
-
+    
     <button type="submit">Agregar competencia</button>
 
     </form>
@@ -1172,6 +1270,8 @@ def administrar_distancias(evento_id):
         <th>Nombre</th>
         <th>Cupo</th>
         <th>Precio</th>
+        <th>Campos</th>
+        <th>Eliminar</th>
     </tr>
     """
 
@@ -1182,6 +1282,21 @@ def administrar_distancias(evento_id):
                 <td>{d['nombre']}</td>
                 <td>{d['cupo']}</td>
                 <td>{d['precio']}</td>
+
+                <td>
+                    <a href="/distancia/{d['id']}/campos"
+                    style="
+                        background:#1976d2;
+                        color:white;
+                        padding:6px 10px;
+                        border-radius:6px;
+                        text-decoration:none;
+                        display:inline-block;
+                    ">
+                        ⚙️ Campos
+                    </a>
+                </td>
+                
                 <td>
                     <form method="POST" style="display:inline;">
                         <input type="hidden" name="accion" value="eliminar">
@@ -1197,6 +1312,25 @@ def administrar_distancias(evento_id):
 
     salida += "</table>"
     return layout(salida, evento_id=evento_id)
+@organizador_bp.route("/distancia/<int:distancia_id>/campos_json")
+def campos_json(distancia_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+    SELECT *
+    FROM distancia_campos
+    WHERE distancia_id = %s
+    ORDER BY id
+    """, (distancia_id,))
+
+    campos = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+
+    return jsonify(campos)
 @organizador_bp.route("/evento/<int:evento_id>/talles", methods=["POST"])
 def guardar_talles(evento_id):
 
@@ -1222,7 +1356,137 @@ def guardar_talles(evento_id):
     conn.close()
     return redirect(f"/evento/{evento_id}/talles_form")
     
+@organizador_bp.route("/distancia/<int:distancia_id>/campos", methods=["GET","POST"])
+def campos_distancia(distancia_id):
 
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    # -------------------------
+    # CREAR CAMPO
+    # -------------------------
+    if request.method == "POST":
+
+        nombre = request.form.get("nombre")
+        tipo = request.form.get("tipo")
+        obligatorio = 1 if request.form.get("obligatorio") else 0
+        opciones = request.form.get("opciones")
+
+        cursor.execute("""
+        INSERT INTO distancia_campos
+        (distancia_id, nombre, tipo, obligatorio, opciones)
+        VALUES (%s,%s,%s,%s,%s)
+        """, (
+            distancia_id,
+            nombre,
+            tipo,
+            obligatorio,
+            opciones
+        ))
+
+        conn.commit()
+
+        return redirect(request.url)
+
+    # -------------------------
+    # DISTANCIA
+    # -------------------------
+    cursor.execute("""
+    SELECT *
+    FROM distancias
+    WHERE id = %s
+    """, (distancia_id,))
+
+    distancia = cursor.fetchone()
+
+    # -------------------------
+    # CAMPOS
+    # -------------------------
+    cursor.execute("""
+    SELECT *
+    FROM distancia_campos
+    WHERE distancia_id = %s
+    ORDER BY id DESC
+    """, (distancia_id,))
+
+    campos = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+
+    salida = f"""
+    <h1>
+    ⚙️ Campos extra
+    </h1>
+
+    <h3>{distancia['nombre']}</h3>
+
+    <form method="POST">
+
+    Nombre campo<br>
+    <input type="text" name="nombre" required><br><br>
+
+    Tipo<br>
+    <select name="tipo">
+
+        <option value="texto">
+            Texto
+        </option>
+
+        <option value="select">
+            Select
+        </option>
+
+    </select>
+
+    <br><br>
+
+    Opciones (solo select)<br>
+    <input 
+        type="text"
+        name="opciones"
+        placeholder="XS,S,M,L"
+    >
+
+    <br><br>
+
+    <label>
+        <input type="checkbox" name="obligatorio">
+        Obligatorio
+    </label>
+
+    <br><br>
+
+    <button>
+        Guardar campo
+    </button>
+
+    </form>
+
+    <hr>
+
+    <table border="1" cellpadding="6">
+
+    <tr>
+        <th>Nombre</th>
+        <th>Tipo</th>
+        <th>Obligatorio</th>
+    </tr>
+    """
+
+    for c in campos:
+
+        salida += f"""
+        <tr>
+            <td>{c['nombre']}</td>
+            <td>{c['tipo']}</td>
+            <td>{"✅" if c['obligatorio'] else "❌"}</td>
+        </tr>
+        """
+
+    salida += "</table>"
+
+    return layout(salida)
 @organizador_bp.route("/inscripcion/<numero>", methods=["GET","POST"])
 def editar_inscripcion(numero):
     print(len(numero))
@@ -1298,12 +1562,16 @@ def editar_inscripcion(numero):
         distancia_id = request.form.get("distancia_id")
 
         cursor.execute("""
-        SELECT distancia_id
+        SELECT id, distancia_id, estado_pago
         FROM inscripciones
-        WHERE numero_inscripcion=%s
+        WHERE numero_inscripcion = %s
         """, (numero,))
 
         ins = cursor.fetchone()
+
+        inscripcion_id = ins["id"]
+        distancia_anterior = ins["distancia_id"]
+        estado_pago = ins["estado_pago"]
 
         if not distancia_id:
             distancia_id = ins["distancia_id"]
@@ -1373,6 +1641,37 @@ def editar_inscripcion(numero):
         WHERE numero_inscripcion=%s
         """, (dorsal, distancia_id, talle, numero))
 
+        # ---------------------------------
+        # SI CAMBIÓ DISTANCIA
+        # ---------------------------------
+
+        if str(distancia_anterior) != str(distancia_id):
+
+            # solo si está pendiente
+            if estado_pago == "pendiente":
+
+                # traer nuevo precio
+                cursor.execute("""
+                SELECT precio
+                FROM distancias
+                WHERE id = %s
+                """, (distancia_id,))
+
+                nueva_distancia = cursor.fetchone()
+
+                nuevo_precio = nueva_distancia["precio"]
+
+                # actualizar pago pendiente
+                cursor.execute("""
+                UPDATE pagos
+                SET monto = %s
+                WHERE inscripcion_id = %s
+                AND estado = 'pendiente'
+                """, (
+                    nuevo_precio,
+                    inscripcion_id
+                ))
+
         
         conn.commit()
 
@@ -1426,13 +1725,12 @@ def editar_inscripcion(numero):
         ins["fecha_nac"] = ins["fecha_nac"].strftime("%Y-%m-%d")
     
     cursor.execute("""
-    SELECT d.id, d.nombre
-    FROM distancias d
-    JOIN inscripciones i ON i.distancia_id = d.id
-    WHERE i.numero_inscripcion = %s
-    AND d.activo = 1
-    ORDER BY d.nombre
-    """, (numero,))
+    SELECT id, nombre
+    FROM distancias
+    WHERE evento_id = %s
+    AND activo = 1
+    ORDER BY nombre
+    """, (evento_id,))
 
     distancias = cursor.fetchall()
     
@@ -1537,7 +1835,7 @@ def editar_inscripcion(numero):
     """
     
     salida += f"""
-    <form method="GET">
+    <form method="POST">
 
     <input type="hidden" name="tab" id="tab_actual" value="{tab}">
 
@@ -1672,12 +1970,17 @@ def editar_inscripcion(numero):
 
     <h2>Pagos</h2>
 
-    <form method="POST">
-        <input type="hidden" name="accion" value="marcar_pagado">
-        <button style="padding:10px;background:#4caf50;color:white;border:none;border-radius:5px">
-            💰 Marcar como pagado
-        </button>
-    </form>
+    <a href="/inscripcion/{numero}/marcar_pagado"
+    style="
+    display:inline-block;
+    padding:10px;
+    background:#4caf50;
+    color:white;
+    border-radius:5px;
+    text-decoration:none;
+    ">
+    💰 Marcar como pagado
+    </a>
 
     <a href="/inscripcion/{numero}/pago"
     style="

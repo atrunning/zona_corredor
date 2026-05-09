@@ -42,7 +42,7 @@ def slugify(texto):
 
 app.register_blueprint(organizador_bp)
 app.register_blueprint(eventos_bp)
-print("🔥 VERSION NUEVA 1 🔥")
+print("🔥 VERSION NUEVA 1.1 🔥")
 def layout(contenido, menu=True, evento_id=None, eventos=None):
 
     salida = ""
@@ -849,7 +849,7 @@ def pagar_evento(evento_id):
                 display:inline-block;
                 font-size:16px;
             ">
-            🎁 BONIFICADO
+            BONIFICADO
             </span>
             """
             boton = ""
