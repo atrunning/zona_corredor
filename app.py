@@ -2873,25 +2873,24 @@ def panel_evento(evento_id):
     # -------------------
     cursor.execute("""
     SELECT 
-        SUM(CASE 
-            WHEN p.estado IN ('aprobado','pagado')
-            AND p.monto > 0
-            THEN (p.monto - IFNULL(p.comision,0))
+        SUM(CASE
+            WHEN p.estado = 'aprobado'
+            THEN p.monto
             ELSE 0
         END) AS cobrado,
 
-        SUM(CASE 
+        SUM(CASE
             WHEN p.estado = 'pendiente'
-            THEN (p.monto - IFNULL(p.comision,0))
+            THEN p.monto
             ELSE 0
         END) AS pendiente,
 
-        SUM(CASE 
+        SUM(CASE
             WHEN p.estado = 'rechazado'
-            THEN (p.monto - IFNULL(p.comision,0))
+            THEN p.monto
             ELSE 0
         END) AS rechazado
-
+        
     FROM pagos p
     JOIN inscripciones i ON p.inscripcion_id = i.id
     WHERE i.evento_id = %s
