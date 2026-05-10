@@ -2354,7 +2354,7 @@ def editar_pago(pago_id):
 
 @organizador_bp.route("/evento/<int:evento_id>/editar", methods=["GET","POST"])
 def editar_evento(evento_id):
-    print(request.form)
+    
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
