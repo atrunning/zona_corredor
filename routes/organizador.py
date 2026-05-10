@@ -815,7 +815,7 @@ def panel_organizador():
 
     for e in eventos:
 
-        imagen = f"/static/eventos/{e['imagen']}" if e["imagen"] else "/static/logo.png"
+        imagen = f"/evento_imagen/{e['imagen']}" if e["imagen"] else "/static/logo.png"
 
         salida += f"""
         <div style="
@@ -1009,7 +1009,7 @@ def nuevo_evento():
     if archivo and archivo.filename != "":
         imagen = secure_filename(archivo.filename)
 
-        carpeta = "static/eventos"
+        carpeta = "data/eventos"
 
         if not os.path.exists(carpeta):
             os.makedirs(carpeta)
@@ -2424,7 +2424,7 @@ def editar_evento(evento_id):
         if archivo and archivo.filename and archivo.filename.strip() != "":
             nombre_archivo = secure_filename(archivo.filename)
 
-            carpeta = "static/eventos"
+            carpeta = "data/eventos"
             os.makedirs(carpeta, exist_ok=True)
 
             ruta = os.path.join(carpeta, nombre_archivo)
@@ -2560,7 +2560,7 @@ def editar_evento(evento_id):
 
     <img id="preview" style="max-width:200px;border-radius:8px;display:none">
 
-    <img src="/static/eventos/{evento.get('imagen') or 'logo.png'}"
+    <img src="/evento_imagen/{evento.get('imagen') or 'logo.png'}"
     style="max-width:200px;border-radius:8px;"><br><br>
 
     <h3>Reglamento (PDF)</h3>

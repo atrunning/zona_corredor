@@ -17,7 +17,7 @@ import mercadopago
 import requests
 from flask import request
 from decimal import Decimal
-
+from flask import send_from_directory
 import os
 from mail import enviar_confirmacion, prueba_mail
 
@@ -42,7 +42,8 @@ def slugify(texto):
 
 app.register_blueprint(organizador_bp)
 app.register_blueprint(eventos_bp)
-print("🔥 VERSION NUEVA 1.1 🔥")
+print("🔥 VERSION NUEVA 1.2 🔥")
+
 def layout(contenido, menu=True, evento_id=None, eventos=None):
 
     salida = ""
@@ -231,6 +232,9 @@ def perfil():
     </body>
     </html>
     """
+@app.route("/evento_imagen/<nombre>")
+def evento_imagen(nombre):
+    return send_from_directory("data/eventos", nombre)
 @app.route("/editar_perfil", methods=["GET","POST"])
 def editar_perfil():
 
@@ -1106,7 +1110,7 @@ def inicio():
                 ">
                     PRÓXIMO
                 </div>
-                <img src="/static/eventos/{imagen}" style="width:100%; height:180px; object-fit:cover; display:block;">
+                <img src="/evento_imagen/{imagen}" style="width:100%; height:180px; object-fit:cover; display:block;">
             </div>
 
             <div style="
@@ -1412,7 +1416,7 @@ def ver_evento(evento_id):
     ">
 
     <div style="flex:1; min-width:300px">
-        <img src="/static/eventos/{imagen}"
+        <img src="/evento_imagen/{imagen}"
         style="
         width:100%;
         height:280px;
