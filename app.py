@@ -235,7 +235,13 @@ def perfil():
     """
 @app.route("/evento_imagen/<nombre>")
 def evento_imagen(nombre):
-    return send_from_directory("data/eventos", nombre)
+
+    ruta_nueva = os.path.join("data/eventos", nombre)
+
+    if os.path.exists(ruta_nueva):
+        return send_from_directory("data/eventos", nombre)
+
+    return send_from_directory("static/eventos", nombre)
 @app.route("/editar_perfil", methods=["GET","POST"])
 def editar_perfil():
 
