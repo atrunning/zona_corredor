@@ -20,6 +20,7 @@ from decimal import Decimal
 from flask import send_from_directory
 import os
 from mail import enviar_confirmacion, prueba_mail
+from mail import enviar_mail
 
 BASE_URL = os.getenv("BASE_URL", "http://localhost:5000")
 print("🔥 BASE_URL EN PRODUCCION:", BASE_URL)
@@ -1863,7 +1864,100 @@ def ver_evento(evento_id):
     </script>
     """
     return layout(salida, menu=False)
+@app.route("/evento/<int:evento_id>/recordar_pendientes", methods=["POST"])
+def recordar_pendientes(evento_id):
 
+    if "organizador_id" not in session:
+        return redirect("/login")
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+    SELECT *
+    FROM eventos
+    WHERE id = %s
+    """, (evento_id,))
+
+    evento = cursor.fetchone()
+
+    if not evento:
+        conn.close()
+        return "Evento no encontrado"
+
+    ultimo = evento.get("ultimo_recordatorio")
+
+    if ultimo:
+        diferencia = datetime.now() - ultimo
+
+        if diferencia.days < 7:
+            conn.close()
+
+            return f"""
+            <script>
+            alert('Ya se envió un recordatorio esta semana');
+            window.location.href='/evento/{evento_id}/panel';
+            </script>
+            """
+
+    cursor.execute("""
+    SELECT *
+    FROM inscripciones
+    WHERE evento_id = %s
+    AND estado_pago = 'pendiente'
+    """, (evento_id,))
+
+    pendientes = cursor.fetchall()
+
+    enviados = 0
+
+    for ins in pendientes:
+
+        if not ins.get("email_contacto"):
+            continue
+
+        try:
+
+            
+            cuerpo = f'''
+            Hola corredor 👋
+
+            Tu inscripción para {evento["nombre"]} actualmente figura como pendiente de pago.
+
+            ⚠️ Si ya realizaste el pago, por favor contactate con el organizador para verificar el estado de tu inscripción ante cualquier posible demora o error de acreditación.
+
+            Si todavía no abonaste, podés ingresar nuevamente al evento para completar la inscripción.
+
+            ¡Te esperamos en la carrera! 🏃🔥
+            '''
+
+            print("MAIL A:", ins["email_contacto"])   
+            enviar_mail(
+                ins["email_contacto"],
+                f"Recordatorio de inscripción - {evento['nombre']}",
+                cuerpo
+            )
+
+            enviados += 1
+
+        except Exception as e:
+            print("ERROR MAIL:", e)
+
+    cursor.execute("""
+    UPDATE eventos
+    SET ultimo_recordatorio = NOW()
+    WHERE id = %s
+    """, (evento_id,))
+
+    conn.commit()
+    conn.close()
+
+    return f"""
+    <script>
+    alert('Recordatorios enviados: {enviados}');
+    window.location.href='/evento/{evento_id}/panel';
+    </script>
+    """
 @app.route("/eventos")
 def listar_eventos():
     conn = get_db_connection()
@@ -2806,7 +2900,7 @@ def panel_evento(evento_id):
     # datos del evento
     # -------------------
     cursor.execute("""
-    SELECT nombre, fecha, lugar, hora, organizador_id, estado, imagen, publicado
+    SELECT nombre, fecha, lugar, hora, organizador_id, estado, imagen, publicado, ultimo_recordatorio
     FROM eventos
     WHERE id = %s
     """,(evento_id,))
@@ -3001,11 +3095,43 @@ def panel_evento(evento_id):
     </a>
 
     <a href="/evento/{evento_id}/editar">
-        <button class="btn">✏️ Editar evento</button>
+        <button class="btn">✏️ Editar evento</button>        
     </a>
-
     </div>
     """
+
+    ultimo = evento.get("ultimo_recordatorio")
+
+    if ultimo:
+        texto_recordatorio = f"Último recordatorio: {ultimo}"
+    else:
+        texto_recordatorio = "Nunca enviado"
+
+    salida += f"""
+    <form method="POST" action="/evento/{evento_id}/recordar_pendientes"
+    onsubmit="return confirm('Se enviarán recordatorios a todas las inscripciones pendientes. ¿Continuar?')">
+
+    <button style="
+    background:transparent;
+    border:1px dashed #999;
+    color:#777;
+    padding:6px 10px;
+    border-radius:6px;
+    font-size:12px;
+    cursor:pointer;
+    margin-top:10px;
+    ">
+    📨 Recordar pendientes
+    </button>
+
+    <div style="font-size:11px;color:#888;margin-top:4px;">
+    {texto_recordatorio}
+    </div>
+
+    </form>
+    """
+
+    
     salida += r"""
     <script>
     function copiarLink(evento_id, nombre_evento) {
