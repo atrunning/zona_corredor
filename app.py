@@ -2393,6 +2393,23 @@ def inscribirse(evento_id):
 
         cupon = request.form.get("cupon", "").strip().upper()
 
+        cupon_id = None
+
+        if cupon:
+
+            cursor.execute("""
+            SELECT id
+            FROM cupones
+            WHERE clave = %s
+            AND activo = 1
+            AND CURDATE() BETWEEN fecha_desde AND fecha_hasta
+            """, (cupon,))
+
+            cup = cursor.fetchone()
+
+            if cup:
+                cupon_id = cup["id"]
+
         distancia_id = request.form.get("distancia_id")
 
         if not distancia_id:
@@ -2766,16 +2783,61 @@ def inscribirse(evento_id):
             conn.close()
             return layout("<h2>❌ Las inscripciones ya están cerradas</h2>")
 
+        cupon_id = None
 
+        if cupon:
+
+            cursor.execute("""
+            SELECT id
+            FROM cupones
+            WHERE clave = %s
+            AND activo = 1
+            AND CURDATE() BETWEEN fecha_desde AND fecha_hasta
+            """, (cupon,))
+
+            cup = cursor.fetchone()
+
+            if cup:
+                cupon_id = cup["id"]
+
+        codigo_cupon = request.form.get("cupon")
+
+        if codigo_cupon:
+
+            cursor.execute("""
+            SELECT id
+            FROM cupones
+            WHERE clave = %s
+            AND activo = 1
+            AND CURDATE() BETWEEN fecha_desde AND fecha_hasta
+            """, (codigo_cupon,))
+
+            cup = cursor.fetchone()
+
+            if cup:
+                cupon_id = cup["id"]
         # -----------------------------
         # insertar inscripción
         # -----------------------------
 
         fecha_inscripcion = datetime.now(ZoneInfo("America/Argentina/Buenos_Aires")).strftime("%Y-%m-%d %H:%M:%S")
+        print("CUPON:", cupon)
+        print("CUPON_ID:", cupon_id)
         cursor.execute("""
         INSERT INTO inscripciones
-        (evento_id, persona_id, distancia_id, edad_evento, email_contacto, telefono_contacto, estado_pago, talle_remera, fecha_inscripcion)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        (
+            evento_id,
+            persona_id,
+            distancia_id,
+            edad_evento,
+            email_contacto,
+            telefono_contacto,
+            estado_pago,
+            talle_remera,
+            fecha_inscripcion,
+            cupon_id
+        )
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """, (
             evento_id,
             persona_id,
@@ -2785,7 +2847,8 @@ def inscribirse(evento_id):
             celular,
             "pendiente",
             talle_remera,
-            fecha_inscripcion
+            fecha_inscripcion,
+            cupon_id
         ))
         
         
