@@ -374,12 +374,42 @@ def inscripcion_manual(evento_id):
             conn.close()
             return "⚠️ Esta persona ya está inscripta en este evento"    
 
+        cupon_id = None
+
+        codigo_cupon = request.form.get("cupon")
+
+        if codigo_cupon:
+
+            cursor.execute("""
+            SELECT id
+            FROM cupones
+            WHERE clave = %s
+            AND activo = 1
+            AND CURDATE() BETWEEN fecha_desde AND fecha_hasta
+            """, (codigo_cupon,))
+
+            cup = cursor.fetchone()
+
+            if cup:
+                cupon_id = cup["id"]
         # Crear inscripción SIN numero primero
         cursor.execute("""
-            INSERT INTO inscripciones
-            (persona_id, evento_id, distancia_id, estado_pago, fecha_inscripcion)
-            VALUES (%s,%s,%s,'pendiente',NOW())
-        """, (persona_id, evento_id, distancia_id))
+        INSERT INTO inscripciones
+        (
+            persona_id,
+            evento_id,
+            distancia_id,
+            estado_pago,
+            fecha_inscripcion,
+            cupon_id
+        )
+        VALUES (%s,%s,%s,'pendiente',NOW(),%s)
+        """, (
+            persona_id,
+            evento_id,
+            distancia_id,
+            cupon_id
+        ))
 
         inscripcion_id = cursor.lastrowid
 
