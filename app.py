@@ -701,12 +701,30 @@ def pagar_mp(numero):
     SELECT
         i.id,
         i.numero_inscripcion,
+        i.cupon_id,
+
         d.precio,
+
+        c.descuento,
+
         o.access_token_mp
+
     FROM inscripciones i
-    JOIN distancias d ON d.id = i.distancia_id
-    JOIN eventos e ON e.id = i.evento_id
-    JOIN organizadores o ON o.id = e.organizador_id
+
+    JOIN distancias d
+        ON d.id = i.distancia_id
+
+    JOIN eventos e
+        ON e.id = i.evento_id
+
+    JOIN organizadores o
+        ON o.id = e.organizador_id
+
+    LEFT JOIN cupones c
+        ON c.id = i.cupon_id
+        AND c.activo = 1
+        AND CURDATE() BETWEEN c.fecha_desde AND c.fecha_hasta
+
     WHERE i.numero_inscripcion = %s
     """, (numero,))
 
@@ -722,12 +740,24 @@ def pagar_mp(numero):
         return "El organizador no tiene Mercado Pago conectado"
 
     inscripcion_id = ins["id"]
-    precio = float(ins["precio"])
+    precio_original = float(ins["precio"])
+
+    precio = precio_original
+
+    # 🎟️ aplicar cupón
+    if ins["descuento"]:
+
+        descuento = float(ins["descuento"])
+
+        precio = precio * (1 - (descuento / 100))
+
+    # redondear
+    precio = round(precio, 2)
 
     # 💰 comisión 3%
     comision = round(precio * 0.03, 2)
 
-    # 💳 total que paga corredor
+    # 💳 total final
     precio_final = round(precio + comision, 2)
 
     access_token = ins["access_token_mp"]
