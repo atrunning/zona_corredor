@@ -2202,8 +2202,6 @@ def inscribirse(evento_id):
 
         distancia = cursor.fetchone()
         
-        cursor.close()
-        conn.close()
 
         salida = f"""
         <div style="max-width:600px;margin:40px auto;font-family:Arial">
