@@ -65,6 +65,7 @@ def ver_inscriptos(evento_id):
 
     cursor.execute("""
         SELECT
+            i.id,
             i.numero_inscripcion,
             i.fecha_inscripcion,
             i.dorsal,
@@ -87,8 +88,25 @@ def ver_inscriptos(evento_id):
 
     inscriptos = cursor.fetchall()
 
-    cursor.close()
-    conn.close()
+    # ---------------------------
+    # Campos extra del evento
+    # ---------------------------
+
+    cursor.execute("""
+    SELECT
+        dc.id,
+        dc.nombre
+    FROM distancia_campos dc
+    JOIN distancias d
+        ON d.id = dc.distancia_id
+    WHERE d.evento_id = %s
+    ORDER BY dc.id
+    """, (evento_id,))
+
+    campos_extra = cursor.fetchall()
+    print("CAMPOS EXTRA:", campos_extra)
+
+    
 
     salida = f"""
     <a href="/evento/{evento_id}/panel" style="
@@ -212,10 +230,17 @@ def ver_inscriptos(evento_id):
     <th>Team</th>
     <th>Número</th>
     <th>Estado</th>
-    <th>Editar</th>
-    </tr>
     """
-    
+
+    for campo in campos_extra:
+        salida += f"<th>{campo['nombre']}</th>"
+
+    salida += """
+
+    <th>Editar</th>
+        </tr>
+        """
+        
 
     for ins in inscriptos:
         print("TEAM RAW:", ins.get("team"))
@@ -251,6 +276,23 @@ def ver_inscriptos(evento_id):
 
         fecha = ins["fecha_inscripcion"].strftime("%d/%m/%Y %H:%M")
 
+        # ---------------------------
+        # Respuestas campos extra
+        # ---------------------------
+
+        cursor.execute("""
+        SELECT campo_id, valor
+        FROM inscripcion_respuestas
+        WHERE inscripcion_id = %s
+        """, (ins["id"],))
+
+        respuestas_db = cursor.fetchall()
+
+        respuestas = {}
+
+        for r in respuestas_db:
+            respuestas[r["campo_id"]] = r["valor"]
+
         # 👇 RECIÉN ACÁ LO USÁS
         salida += f"""
         <tr>
@@ -264,6 +306,16 @@ def ver_inscriptos(evento_id):
         <td>{team}</td>
         <td>{ins['dorsal'] if ins['dorsal'] else '-'}</td>
         <td>{estado}</td>
+        """
+
+        for campo in campos_extra:
+
+            valor = respuestas.get(campo["id"], "-")
+
+            salida += f"<td>{valor}</td>"
+
+        salida += f"""
+
         <td>
         <a href="/inscripcion/{ins['numero_inscripcion']}">
         <button type="button">✏️</button>
@@ -323,7 +375,9 @@ def ver_inscriptos(evento_id):
 
     </script>
     """     
-    
+    cursor.close()
+    conn.close()
+
     return layout(salida)
 @organizador_bp.route("/evento/<int:evento_id>/inscripcion_manual", methods=["GET","POST"])
 def inscripcion_manual(evento_id):
@@ -1555,6 +1609,7 @@ def editar_inscripcion(numero):
             WHERE numero_inscripcion = %s
             """, (numero,))
 
+
             conn.commit()
 
             cursor.close()
@@ -1663,6 +1718,7 @@ def editar_inscripcion(numero):
             genero,team_id,numero
         ))
         print("DISTANCIA RECIBIDA:", distancia_id)
+
         cursor.execute("""
         UPDATE inscripciones
         SET dorsal=%s,
@@ -1702,10 +1758,50 @@ def editar_inscripcion(numero):
                     inscripcion_id
                 ))
 
-        
+        # -------------------------
+        # RECARGAR CAMPOS EXTRA
+        # -------------------------
+
+        cursor.execute("""
+        SELECT *
+        FROM distancia_campos
+        WHERE distancia_id = %s
+        ORDER BY id
+        """, (distancia_id,))
+
+        campos_extra = cursor.fetchall()
+
+        # -------------------------
+        # GUARDAR CAMPOS EXTRA
+        # -------------------------
+
+        cursor.execute("""
+        DELETE FROM inscripcion_respuestas
+        WHERE inscripcion_id = %s
+        """, (inscripcion_id,))
+
+        for campo in campos_extra:
+
+            print("CAMPO:", campo["id"], campo["nombre"])
+
+            valor = request.form.get(f"campo_{campo['id']}", "")
+
+            print("VALOR:", valor)
+
+            cursor.execute("""
+            INSERT INTO inscripcion_respuestas
+            (inscripcion_id, campo_id, valor)
+            VALUES (%s,%s,%s)
+            """, (
+                inscripcion_id,
+                campo["id"],
+                valor
+            ))
+
         conn.commit()
 
         tab = request.args.get("tab") or request.form.get("tab") or "resumen"
+
         return redirect(f"/inscripcion/{numero}?ok=1&tab={tab}")
             
     # -------------------------
@@ -1763,6 +1859,33 @@ def editar_inscripcion(numero):
     """, (evento_id,))
 
     distancias = cursor.fetchall()
+
+    # -------------------------
+    # CAMPOS EXTRA DISTANCIA
+    # -------------------------
+
+    cursor.execute("""
+    SELECT *
+    FROM distancia_campos
+    WHERE distancia_id = %s
+    ORDER BY id
+    """, (ins["distancia_id"],))
+
+    campos_extra = cursor.fetchall()
+
+    # respuestas guardadas
+    cursor.execute("""
+    SELECT campo_id, valor
+    FROM inscripcion_respuestas
+    WHERE inscripcion_id = %s
+    """, (inscripcion_id,))
+
+    respuestas_db = cursor.fetchall()
+
+    respuestas_extra = {}
+
+    for r in respuestas_db:
+        respuestas_extra[r["campo_id"]] = r["valor"]
     
     # =========================
     # PAGOS DE LA INSCRIPCION
@@ -1882,7 +2005,7 @@ def editar_inscripcion(numero):
     ">
     ← Volver a inscriptos
     </a>
-
+    
     <h2>Resumen</h2>
 
     Código: {ins['numero_inscripcion']}<br><br>
@@ -1956,6 +2079,54 @@ def editar_inscripcion(numero):
     Strava<br>
     <input type="text" name="strava" value="{ins.get('strava','')}"><br><br>
     """
+    # -------------------------
+    # CAMPOS EXTRA VISUALES
+    # -------------------------
+
+    salida += "<h3>Campos extra</h3>"
+
+    for campo in campos_extra:
+
+        valor = respuestas_extra.get(campo["id"], "")
+
+        salida += f"<label>{campo['nombre']}</label><br>"
+
+        # TEXTO
+        if campo["tipo"] == "texto":
+
+            salida += f"""
+            <input
+                type="text"
+                name="campo_{campo['id']}"
+                value="{valor}"
+                style="width:300px"
+            ><br><br>
+            """
+
+        # SELECT
+        elif campo["tipo"] == "select":
+
+            
+            salida += f"""
+
+            <select name="campo_{campo['id']}">
+            """
+
+            opciones = campo.get("opciones") or ""
+
+            for op in opciones.split(","):
+
+                op = op.strip()
+
+                selected = "selected" if op == valor else ""
+
+                salida += f"""
+                <option value="{op}" {selected}>
+                    {op}
+                </option>
+                """
+
+            salida += "</select><br><br>"
     
     print("EVENTO INS:", ins["evento_id"])
     cursor.execute("""
@@ -1965,14 +2136,14 @@ def editar_inscripcion(numero):
     """, (ins["evento_id"],))
 
     talles = cursor.fetchall()
-
+    salida += "Talle remera<br>"
     salida += '<select name="talle_remera">'
     salida += '<option value="">Seleccionar</option>'
 
     for t in talles:
         selected = "selected" if ins.get("talle_remera") == t["talle"] else ""
         salida += f"<option value='{t['talle']}' {selected}>{t['talle']}</option>"
-
+    
     salida += '</select><br><br>'
 
     # 👇 ACÁ ABRÍ DE NUEVO
@@ -2976,16 +3147,33 @@ def exportar_excel(evento_id):
 
     cursor.execute(query, params)
     datos = cursor.fetchall()
+
+    # -------------------------
+    # CAMPOS EXTRA
+    # -------------------------
+
+    cursor.execute("""
+    SELECT dc.id, dc.nombre
+    FROM distancia_campos dc
+    JOIN distancias d
+        ON d.id = dc.distancia_id
+    WHERE d.evento_id = %s
+    ORDER BY dc.id
+    """, (evento_id,))
+
+    campos_extra = cursor.fetchall()
+
     cursor.close()
     conn.close()
+    
 
-    # 🧾 CREAR EXCEL
+# 🧾 CREAR EXCEL
     wb = Workbook()
     ws = wb.active
     ws.title = "Participantes"
 
     # encabezados
-    ws.append([
+    headers = [
         "Evento",
         "Código",
         "Nombre",
@@ -2997,18 +3185,25 @@ def exportar_excel(evento_id):
         "Género",
         "Categoría",
         "Provincia",
-        "País",        
+        "País",
         "Ciudad",
         "Dirección",
         "Distancia",
         "Estado",
         "Monto Pagado",
         "Fecha Pago",
-        "Fecha inscripción",        
+        "Fecha inscripción",
         "Dorsal",
         "Team",
         "Talle Remera"
-    ])
+    ]
+
+    for campo in campos_extra:
+        headers.append(campo["nombre"])
+
+    ws.append(headers)
+
+
     from datetime import date
 
     for d in datos:
@@ -3023,7 +3218,32 @@ def exportar_excel(evento_id):
         # estado
         estado_txt = "Pagado" if d["estado_pago"] in ["pagado","aprobado"] else "Pendiente"
 
-        ws.append([
+        # respuestas campos extra
+
+        conn2 = get_db_connection()
+        cursor2 = conn2.cursor(dictionary=True)
+
+        cursor2.execute("""
+        SELECT campo_id, valor
+        FROM inscripcion_respuestas
+        WHERE inscripcion_id = (
+            SELECT id
+            FROM inscripciones
+            WHERE numero_inscripcion = %s
+        )
+        """, (d["numero_inscripcion"],))
+
+        respuestas = cursor2.fetchall()
+
+        cursor2.close()
+        conn2.close()
+
+        resp_dict = {
+            r["campo_id"]: r["valor"]
+            for r in respuestas
+        }
+
+        fila = [
             d["evento"],
             d["numero_inscripcion"],
             d["nombre"],
@@ -3046,7 +3266,14 @@ def exportar_excel(evento_id):
             d["dorsal"] or "",
             d["team"] or "",
             d["talle_remera"] or ""
-        ])
+]
+
+        for campo in campos_extra:
+            fila.append(
+                resp_dict.get(campo["id"], "")
+            )
+
+        ws.append(fila)
     # guardar en memoria
     output = io.BytesIO()
     wb.save(output)

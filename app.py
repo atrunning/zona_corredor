@@ -43,7 +43,7 @@ def slugify(texto):
 
 app.register_blueprint(organizador_bp)
 app.register_blueprint(eventos_bp)
-print("🔥 VERSION NUEVA 1.2 🔥")
+print("🔥 VERSION NUEVA 1.3 🔥")
 
 def layout(contenido, menu=True, evento_id=None, eventos=None):
 
@@ -2241,7 +2241,8 @@ def inscribirse(evento_id):
 
         <input type="text" name="celular" value="{persona['celular']}" placeholder="Celular"
         style="padding:10px;border:1px solid #ccc;border-radius:6px;">
-
+        
+        Fecha nacimiento<br>
         <input type="date" name="fecha_nacimiento" value="{persona.get('fecha_nac','')}" required
         style="padding:10px;border:1px solid #ccc;border-radius:6px;">
 
@@ -2306,9 +2307,6 @@ def inscribirse(evento_id):
             """, (evento_id,))
 
             talles = cursor.fetchall()
-
-            cursor.close()
-            conn.close()
             
             salida += '<h3>Talle de remera</h3>'
             salida += '<select name="talle_remera" required style="padding:10px;border-radius:6px;">'
@@ -2318,7 +2316,76 @@ def inscribirse(evento_id):
                 salida += f"<option value='{t['talle']}'>{t['talle']}</option>"
 
             salida += '</select>'
+        # -------------------------
+        # CAMPOS EXTRA
+        # -------------------------
 
+        cursor = conn.cursor(dictionary=True)
+
+        cursor.execute("""
+        SELECT *
+        FROM distancia_campos
+        WHERE distancia_id = %s
+        ORDER BY id
+        """, (distancia_id,))
+
+        campos_extra = cursor.fetchall()
+
+        if campos_extra:
+
+            salida += "<h3>Campos extra</h3>"
+
+            for campo in campos_extra:
+
+                # TEXTO
+                if campo["tipo"] == "texto":
+
+                    salida += f"""
+                    {campo['nombre']}<br>
+
+                    <input
+                        type="text"
+                        name="campo_{campo['id']}"
+                        style="
+                        padding:10px;
+                        border:1px solid #ccc;
+                        border-radius:6px;
+                        width:100%;
+                        "
+                    ><br><br>
+                    """
+
+                # SELECT
+                elif campo["tipo"] == "select":
+
+                    salida += f"""
+                    {campo['nombre']}<br>
+
+                    <select
+                        name="campo_{campo['id']}"
+                        style="
+                        padding:10px;
+                        border-radius:6px;
+                        width:100%;
+                        "
+                    >
+
+                    <option value="">Seleccionar</option>
+                    """
+
+                    opciones = campo.get("opciones") or ""
+
+                    for op in opciones.split(","):
+
+                        op = op.strip()
+
+                        salida += f"""
+                        <option value="{op}">
+                            {op}
+                        </option>
+                        """
+
+                    salida += "</select><br><br>"
         # 👥 Team
         salida += '<h3>Equipo</h3>'
         salida += '<select name="team_id" style="padding:10px;border-radius:6px;">'
@@ -2373,6 +2440,8 @@ def inscribirse(evento_id):
         });
         </script>
         """
+        cursor.close()
+        conn.close()
 
         return salida
 
@@ -2856,6 +2925,37 @@ def inscribirse(evento_id):
         conn.commit()
 
         inscripcion_id = cursor.lastrowid
+
+        # -------------------------
+        # GUARDAR CAMPOS EXTRA
+        # -------------------------
+
+        cursor.execute("""
+        SELECT *
+        FROM distancia_campos
+        WHERE distancia_id = %s
+        ORDER BY id
+        """, (distancia_id,))
+
+        campos_extra = cursor.fetchall()
+
+        for campo in campos_extra:
+
+            valor = request.form.get(f"campo_{campo['id']}", "")
+
+            print("CAMPO NUEVO:", campo["nombre"])
+            print("VALOR NUEVO:", valor)
+
+            cursor.execute("""
+            INSERT INTO inscripcion_respuestas
+            (inscripcion_id, campo_id, valor)
+            VALUES (%s,%s,%s)
+            """, (
+                inscripcion_id,
+                campo["id"],
+                valor
+            ))
+
         numero = f"{evento_id}-{str(inscripcion_id).zfill(8)}"
 
         cursor.execute(
