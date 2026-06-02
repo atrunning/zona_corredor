@@ -3162,11 +3162,13 @@ def exportar_excel(evento_id):
     ORDER BY dc.id
     """, (evento_id,))
 
-    print("CAMPOS EXTRA:", len(campos_extra))
-    print("USAR CAMPOS EXTRA:", usar_campos_extra)
+    
 
     campos_extra = cursor.fetchall()
     usar_campos_extra = len(campos_extra) > 0
+
+    print("CAMPOS EXTRA:", len(campos_extra))
+    print("USAR CAMPOS EXTRA:", usar_campos_extra)
 
     cursor.close()
     conn.close()
