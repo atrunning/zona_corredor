@@ -3214,6 +3214,29 @@ def exportar_excel(evento_id):
     from datetime import date
     print("REGISTROS:", len(datos))
 
+    # cargar todas las respuestas de una sola vez
+    respuestas_por_inscripcion = {}
+
+    if usar_campos_extra:
+
+        conn2 = get_db_connection()
+        cursor2 = conn2.cursor(dictionary=True)
+
+        cursor2.execute("""
+        SELECT inscripcion_id, campo_id, valor
+        FROM inscripcion_respuestas
+        """)
+
+        todas_respuestas = cursor2.fetchall()
+
+        cursor2.close()
+        conn2.close()
+
+        for r in todas_respuestas:
+            respuestas_por_inscripcion.setdefault(
+                r["inscripcion_id"], {}
+            )[r["campo_id"]] = r["valor"]
+
     for d in datos:
 
         # calcular edad
@@ -3228,28 +3251,10 @@ def exportar_excel(evento_id):
 
         # respuestas campos extra
 
-        resp_dict = {}
-
-        if usar_campos_extra:
-
-            conn2 = get_db_connection()
-            cursor2 = conn2.cursor(dictionary=True)
-
-            cursor2.execute("""
-            SELECT campo_id, valor
-            FROM inscripcion_respuestas
-            WHERE inscripcion_id = %s
-            """, (d["id"],))
-
-            respuestas = cursor2.fetchall()
-
-            cursor2.close()
-            conn2.close()
-
-            resp_dict = {
-                r["campo_id"]: r["valor"]
-                for r in respuestas
-            }
+        resp_dict = respuestas_por_inscripcion.get(
+            d["id"],
+            {}
+        )
 
         fila = [
             d["evento"],
