@@ -3212,6 +3212,7 @@ def exportar_excel(evento_id):
 
 
     from datetime import date
+    print("REGISTROS:", len(datos))
 
     for d in datos:
 
