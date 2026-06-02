@@ -3163,6 +3163,7 @@ def exportar_excel(evento_id):
     """, (evento_id,))
 
     campos_extra = cursor.fetchall()
+    usar_campos_extra = len(campos_extra) > 0
 
     cursor.close()
     conn.close()
@@ -3221,28 +3222,28 @@ def exportar_excel(evento_id):
 
         # respuestas campos extra
 
-        conn2 = get_db_connection()
-        cursor2 = conn2.cursor(dictionary=True)
+        resp_dict = {}
 
-        cursor2.execute("""
-        SELECT campo_id, valor
-        FROM inscripcion_respuestas
-        WHERE inscripcion_id = (
-            SELECT id
-            FROM inscripciones
-            WHERE numero_inscripcion = %s
-        )
-        """, (d["numero_inscripcion"],))
+        if usar_campos_extra:
 
-        respuestas = cursor2.fetchall()
+            conn2 = get_db_connection()
+            cursor2 = conn2.cursor(dictionary=True)
 
-        cursor2.close()
-        conn2.close()
+            cursor2.execute("""
+            SELECT campo_id, valor
+            FROM inscripcion_respuestas
+            WHERE inscripcion_id = %s
+            """, (d["id"],))
 
-        resp_dict = {
-            r["campo_id"]: r["valor"]
-            for r in respuestas
-        }
+            respuestas = cursor2.fetchall()
+
+            cursor2.close()
+            conn2.close()
+
+            resp_dict = {
+                r["campo_id"]: r["valor"]
+                for r in respuestas
+            }
 
         fila = [
             d["evento"],
