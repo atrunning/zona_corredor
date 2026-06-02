@@ -3089,6 +3089,7 @@ def exportar_excel(evento_id):
     nombre_evento = evento["nombre"]
     query = """
     SELECT
+        i.id,
         e.nombre AS evento,
         i.numero_inscripcion,
         p.nombre,
