@@ -760,6 +760,15 @@ def pagar_mp(numero):
     # 💳 total final
     precio_final = round(precio + comision, 2)
 
+    print("================================")
+    print("INSCRIPCION:", numero)
+    print("PRECIO ORIGINAL:", precio_original)
+    print("DESCUENTO:", ins["descuento"])
+    print("PRECIO CON DESCUENTO:", precio)
+    print("COMISION:", comision)
+    print("TOTAL MP:", precio_final)
+    print("================================")
+
     access_token = ins["access_token_mp"]
 
     # Cobra con token del organizador
@@ -2458,25 +2467,7 @@ def inscribirse(evento_id):
         </script>
         """
 
-        cupon = request.form.get("cupon", "").strip().upper()
-
-        cupon_id = None
-
-        if cupon:
-
-            cursor.execute("""
-            SELECT id
-            FROM cupones
-            WHERE clave = %s
-            AND activo = 1
-            AND CURDATE() BETWEEN fecha_desde AND fecha_hasta
-            """, (cupon,))
-
-            cup = cursor.fetchone()
-
-            if cup:
-                cupon_id = cup["id"]
-
+        
         distancia_id = request.form.get("distancia_id")
 
         if not distancia_id:
@@ -2850,6 +2841,8 @@ def inscribirse(evento_id):
             conn.close()
             return layout("<h2>❌ Las inscripciones ya están cerradas</h2>")
 
+        cupon = request.form.get("cupon", "").strip().upper()
+
         cupon_id = None
 
         if cupon:
@@ -2857,32 +2850,19 @@ def inscribirse(evento_id):
             cursor.execute("""
             SELECT id
             FROM cupones
-            WHERE clave = %s
+            WHERE evento_id = %s
+            AND clave = %s
             AND activo = 1
             AND CURDATE() BETWEEN fecha_desde AND fecha_hasta
-            """, (cupon,))
+            LIMIT 1
+            """, (evento_id, cupon))
 
             cup = cursor.fetchone()
 
             if cup:
                 cupon_id = cup["id"]
 
-        codigo_cupon = request.form.get("cupon")
-
-        if codigo_cupon:
-
-            cursor.execute("""
-            SELECT id
-            FROM cupones
-            WHERE clave = %s
-            AND activo = 1
-            AND CURDATE() BETWEEN fecha_desde AND fecha_hasta
-            """, (codigo_cupon,))
-
-            cup = cursor.fetchone()
-
-            if cup:
-                cupon_id = cup["id"]
+        
         # -----------------------------
         # insertar inscripción
         # -----------------------------
