@@ -317,10 +317,18 @@ def ver_inscriptos(evento_id):
         salida += f"""
 
         <td>
+
         <a href="/inscripcion/{ins['numero_inscripcion']}">
         <button type="button">✏️</button>
         </a>
+
+        <a href="/inscripcion/{ins['numero_inscripcion']}/eliminar"
+        onclick="return confirm('¿Eliminar esta inscripción?');">
+        <button type="button">🗑️</button>
+        </a>
+
         </td>
+
         </tr>
         """
 
@@ -379,6 +387,71 @@ def ver_inscriptos(evento_id):
     conn.close()
 
     return layout(salida)
+@organizador_bp.route("/inscripcion/<numero>/eliminar")
+def eliminar_inscripcion(numero):
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+    SELECT id, evento_id
+    FROM inscripciones
+    WHERE numero_inscripcion = %s
+    """, (numero,))
+
+    ins = cursor.fetchone()
+
+    if not ins:
+        cursor.close()
+        conn.close()
+        return "Inscripción no encontrada"
+    
+    cursor.execute("""
+    SELECT COUNT(*) AS total
+    FROM pagos
+    WHERE inscripcion_id = %s
+    AND estado IN ('pagado','aprobado')
+    """, (ins["id"],))
+
+    pagos = cursor.fetchone()
+
+    if pagos["total"] > 0:
+        cursor.close()
+        conn.close()
+
+        return """
+        <script>
+        alert("No se puede eliminar porque la inscripción tiene un pago registrado.");
+        history.back();
+        </script>
+        """
+
+    # Borrar respuestas
+    cursor.execute("""
+    DELETE FROM inscripcion_respuestas
+    WHERE inscripcion_id = %s
+    """, (ins["id"],))
+
+    # Borrar pagos pendientes (si existen)
+    cursor.execute("""
+    DELETE FROM pagos
+    WHERE inscripcion_id = %s
+    """, (ins["id"],))
+
+    # Borrar inscripción
+    cursor.execute("""
+    DELETE FROM inscripciones
+    WHERE id = %s
+    """, (ins["id"],))
+
+    conn.commit()
+
+    evento_id = ins["evento_id"]
+
+    cursor.close()
+    conn.close()
+
+    return redirect(f"/evento/{evento_id}/inscriptos")
 @organizador_bp.route("/evento/<int:evento_id>/inscripcion_manual", methods=["GET","POST"])
 def inscripcion_manual(evento_id):
 
@@ -1719,6 +1792,32 @@ def editar_inscripcion(numero):
         ))
         print("DISTANCIA RECIBIDA:", distancia_id)
 
+        # -------------------------
+        # VALIDAR DORSAL REPETIDO
+        # -------------------------
+        if dorsal:
+
+            cursor.execute("""
+            SELECT numero_inscripcion
+            FROM inscripciones
+            WHERE dorsal = %s
+            AND numero_inscripcion <> %s
+            """, (dorsal, numero))
+
+            existe = cursor.fetchone()
+
+            if existe:
+
+                cursor.close()
+                conn.close()
+
+                return f"""
+                <script>
+                alert("El dorsal {dorsal} ya está asignado.");
+                history.back();
+                </script>
+                """
+
         cursor.execute("""
         UPDATE inscripciones
         SET dorsal=%s,
@@ -2009,6 +2108,14 @@ def editar_inscripcion(numero):
     <h2>Resumen</h2>
 
     Código: {ins['numero_inscripcion']}<br><br>
+
+    Dorsal<br>
+    <input
+        type="number"
+        name="dorsal"
+        value="{ins['dorsal'] if ins['dorsal'] else ''}"
+        style="width:120px;padding:6px"
+    ><br><br>
 
     Distancia<br>
     <select name="distancia_id" style="width:220px;padding:6px;font-size:14px">
