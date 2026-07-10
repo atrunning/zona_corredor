@@ -2256,11 +2256,23 @@ def inscribirse(evento_id):
         <input type="number" name="edad" min="1" max="100" placeholder="Edad"
         style="padding:10px;border:1px solid #ccc;border-radius:6px;">
 
-        <select name="genero" style="padding:10px;border-radius:6px;">
-            <option value="">Seleccionar género</option>
-            <option value="M" {"selected" if persona.get("genero")=="M" else ""}>Masculino</option>
-            <option value="F" {"selected" if persona.get("genero")=="F" else ""}>Femenino</option>
-            <option value="X" {"selected" if persona.get("genero")=="X" else ""}>Otro</option>
+        <select
+            name="genero"
+            required
+            style="padding:10px;border-radius:6px;">
+
+            <option value="">Seleccionar sexo</option>
+
+            <option value="M"
+                {"selected" if persona.get("genero")=="M" else ""}>
+                Masculino
+            </option>
+
+            <option value="F"
+                {"selected" if persona.get("genero")=="F" else ""}>
+                Femenino
+            </option>
+
         </select>
 
         <h3>Ubicación</h3>
@@ -2353,6 +2365,7 @@ def inscribirse(evento_id):
                     <input
                         type="text"
                         name="campo_{campo['id']}"
+                        {"required" if campo["obligatorio"] else ""}
                         style="
                         padding:10px;
                         border:1px solid #ccc;
@@ -2370,6 +2383,7 @@ def inscribirse(evento_id):
 
                     <select
                         name="campo_{campo['id']}"
+                        {"required" if campo["obligatorio"] else ""}
                         style="
                         padding:10px;
                         border-radius:6px;
@@ -2471,13 +2485,47 @@ def inscribirse(evento_id):
         distancia_id = request.form.get("distancia_id")
 
         if not distancia_id:
-            return "Error: distancia perdida 😈"
+            return "Error: distancia perdida 😅"
+        
+        # ------------------------------------
+        # VALIDAR CAMPOS OBLIGATORIOS
+        # ------------------------------------
 
-         
+        cursor.execute("""
+        SELECT id, nombre
+        FROM distancia_campos
+        WHERE distancia_id = %s
+        AND obligatorio = 1
+        ORDER BY id
+        """, (distancia_id,))
+
+        campos_obligatorios = cursor.fetchall()
+
+        for campo in campos_obligatorios:
+
+            valor = request.form.get(f"campo_{campo['id']}", "").strip()
+
+            if not valor:
+                return f"""
+                <script>
+                alert("Debe completar el campo: {campo['nombre']}");
+                history.back();
+                </script>
+                """
+
+        # ------------------------------------
+
+        genero = request.form.get("genero", "").strip()
+
+        if genero not in ("M", "F"):
+            return """
+            <script>
+            alert("Debe seleccionar el sexo del corredor.");
+            history.back();
+            </script>
+            """
+
         fecha_nac = request.form.get("fecha_nacimiento")
-
-        if not fecha_nac:
-            return "Falta fecha de nacimiento"
 
         fecha_nac = datetime.strptime(fecha_nac, "%Y-%m-%d").date()
 
