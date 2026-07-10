@@ -2503,7 +2503,7 @@ def inscribirse(evento_id):
 
         for campo in campos_obligatorios:
 
-            valor = request.form.get(f"campo_{campo['id']}", "").strip()
+            valor = (request.form.get(f"campo_{campo['id']}") or "").strip()
 
             if not valor:
                 return f"""
