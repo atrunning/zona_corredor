@@ -730,22 +730,122 @@ window.addEventListener("load", cargarCampos)
 @organizador_bp.route("/evento/<int:evento_id>/talles_form")
 def talles_form(evento_id):
 
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+    SELECT
+        sr.talle,
+        sr.stock,
+        COUNT(i.id) AS vendidos
+    FROM stock_remeras sr
+
+    LEFT JOIN inscripciones i
+        ON i.evento_id = sr.evento_id
+        AND i.talle_remera = sr.talle
+        AND i.estado_pago IN ('pagado','gratis')
+
+    WHERE sr.evento_id = %s
+
+    GROUP BY sr.id,sr.talle,sr.stock
+
+    ORDER BY FIELD(sr.talle,'XS','S','M','L','XL','XXL','XXXL')
+    """,(evento_id,))
+
+    remeras = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+
     salida = f"""
-    <h2>👕 Configurar talles</h2>
+    <h2>👕 Stock de remeras</h2>
 
-    <form method="POST" action="/evento/{evento_id}/talles">
+    <form method="POST" action="/evento/{evento_id}/guardar_stock">
 
-    <textarea name="talles" style="width:300px;height:80px"
-    placeholder="XS,S,M,L,XL,XXL"></textarea>
+    <table border="1" cellpadding="8"
+    style="border-collapse:collapse">
 
-    <br><br>
+    <tr style="background:#eee">
+        <th>Talle</th>
+        <th>Stock</th>
+        <th>Vendidas</th>
+        <th>Disponibles</th>
+    </tr>
+    """
 
-    <button>Guardar talles</button>
+    for r in remeras:
+
+        libres = r["stock"] - r["vendidos"]
+
+        salida += f"""
+        <tr>
+
+            <td><b>{r['talle']}</b></td>
+
+            <td>
+                <input
+                    type="number"
+                    name="stock_{r['talle']}"
+                    value="{r['stock']}"
+                    style="width:70px"
+                >
+            </td>
+
+            <td align="center">
+                {r['vendidos']}
+            </td>
+
+            <td align="center">
+                <b>{libres}</b>
+            </td>
+
+        </tr>
+        """
+
+    salida += """
+    </table>
+
+    <br>
+
+    <button>
+    💾 Guardar cambios
+    </button>
 
     </form>
     """
 
-    return layout(salida, evento_id=evento_id)
+    return layout(salida,evento_id=evento_id)
+@organizador_bp.route("/evento/<int:evento_id>/guardar_stock", methods=["POST"])
+def guardar_stock(evento_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+    SELECT talle
+    FROM stock_remeras
+    WHERE evento_id=%s
+    """,(evento_id,))
+
+    talles = cursor.fetchall()
+
+    for t in talles:
+
+        stock = request.form.get(f"stock_{t['talle']}")
+
+        cursor.execute("""
+        UPDATE stock_remeras
+        SET stock=%s
+        WHERE evento_id=%s
+        AND talle=%s
+        """,(stock,evento_id,t["talle"]))
+
+    conn.commit()
+
+    cursor.close()
+    conn.close()
+
+    return redirect(f"/evento/{evento_id}/talles_form")
 @organizador_bp.route("/corredores")
 def ver_corredores():
 

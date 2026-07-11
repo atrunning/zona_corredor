@@ -2021,6 +2021,24 @@ def listar_eventos():
 
     return salida
 
+def usa_control_stock(evento_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+        SELECT COUNT(*) AS cantidad
+        FROM stock_remeras
+        WHERE evento_id = %s
+    """, (evento_id,))
+
+    cantidad = cursor.fetchone()["cantidad"]
+
+    cursor.close()
+    conn.close()
+
+    return bool(cantidad)
+
 @app.route("/evento/<int:evento_id>/reporte_remeras")
 def reporte_remeras(evento_id):
 
@@ -2319,14 +2337,45 @@ def inscribirse(evento_id):
             conn = get_db_connection()
             cursor = conn.cursor(dictionary=True)
 
-            cursor.execute("""
-            SELECT talle FROM talles_evento
-            WHERE evento_id = %s
-            ORDER BY FIELD(talle,'XS','S','M','L','XL','XXL','XXXL')
-            """, (evento_id,))
+            if usa_control_stock(evento_id):
 
-            talles = cursor.fetchall()
-            
+                cursor.execute("""
+                SELECT
+                    sr.talle,
+                    sr.stock,
+                    COUNT(i.id) AS usados
+                FROM stock_remeras sr
+
+                LEFT JOIN inscripciones i
+                    ON i.evento_id = sr.evento_id
+                    AND i.talle_remera = sr.talle
+                    AND i.estado_pago IN ('pagado','gratis')
+
+                WHERE sr.evento_id = %s
+
+                GROUP BY sr.id, sr.talle, sr.stock
+
+                ORDER BY FIELD(sr.talle,'XS','S','M','L','XL','XXL','XXXL')
+                """, (evento_id,))
+
+                talles = []
+
+                for fila in cursor.fetchall():
+
+                    if fila["usados"] < fila["stock"]:
+                        talles.append({"talle": fila["talle"]})
+
+            else:
+
+                cursor.execute("""
+                SELECT talle
+                FROM stock_remeras
+                WHERE evento_id = %s
+                ORDER BY FIELD(talle,'XS','S','M','L','XL','XXL','XXXL')
+                """, (evento_id,))
+
+                talles = cursor.fetchall()
+
             salida += '<h3>Talle de remera</h3>'
             salida += '<select name="talle_remera" required style="padding:10px;border-radius:6px;">'
             salida += '<option value="">Seleccionar</option>'
@@ -2335,6 +2384,8 @@ def inscribirse(evento_id):
                 salida += f"<option value='{t['talle']}'>{t['talle']}</option>"
 
             salida += '</select>'
+
+           
         # -------------------------
         # CAMPOS EXTRA
         # -------------------------
