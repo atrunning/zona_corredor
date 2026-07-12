@@ -2348,7 +2348,7 @@ def inscribirse(evento_id):
 
                 LEFT JOIN inscripciones i
                     ON i.evento_id = sr.evento_id
-                    AND i.talle_remera = sr.talle
+                    AND UPPER(i.talle_remera) = UPPER(sr.talle)
                     AND i.estado_pago IN ('pagado','gratis')
 
                 WHERE sr.evento_id = %s

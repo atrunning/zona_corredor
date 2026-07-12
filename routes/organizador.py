@@ -735,60 +735,100 @@ def talles_form(evento_id):
 
     cursor.execute("""
     SELECT
+        sr.id,
         sr.talle,
         sr.stock,
+        sr.activo,
         COUNT(i.id) AS vendidos
+
     FROM stock_remeras sr
 
     LEFT JOIN inscripciones i
         ON i.evento_id = sr.evento_id
-        AND i.talle_remera = sr.talle
-        AND i.estado_pago IN ('pagado','gratis')
+        AND UPPER(i.talle_remera) = UPPER(sr.talle)
+        AND i.estado_pago IN ('pagado','bonificado')
 
     WHERE sr.evento_id = %s
 
-    GROUP BY sr.id,sr.talle,sr.stock
+    GROUP BY
+        sr.id,
+        sr.talle,
+        sr.stock,
+        sr.activo
 
     ORDER BY FIELD(sr.talle,'XS','S','M','L','XL','XXL','XXXL')
-    """,(evento_id,))
+    """, (evento_id,))               
 
     remeras = cursor.fetchall()
 
     cursor.close()
     conn.close()
+    
+    error = request.args.get("error")
 
     salida = f"""
     <h2>👕 Stock de remeras</h2>
-
+    """
+    if error == "vendido":
+        salida += """
+        <div style="
+            background:#ffe6e6;
+            color:#900;
+            border:1px solid #cc0000;
+            padding:10px;
+            margin:10px 0;
+            border-radius:5px;
+            font-weight:bold;">
+            ⚠️ No se puede eliminar el talle porque ya tiene remeras asignadas.
+            Puede desactivarlo si no desea ofrecerlo.
+        </div>
+        """
+    salida += f"""
     <form method="POST" action="/evento/{evento_id}/guardar_stock">
 
-    <table border="1" cellpadding="8"
+    <table id="tabla_talles"
+    border="1"
+    cellpadding="8"
     style="border-collapse:collapse">
 
     <tr style="background:#eee">
+        <th>Activo</th>
         <th>Talle</th>
         <th>Stock</th>
         <th>Vendidas</th>
         <th>Disponibles</th>
+        <th>Acción</th>
     </tr>
     """
 
     for r in remeras:
+    
+        checked = "checked" if r["activo"] else ""
 
         libres = r["stock"] - r["vendidos"]
 
         salida += f"""
         <tr>
+            <td align="center">
+            <input
+                type="checkbox"
+                name="activo_{r['id']}"
+                {checked}>
+            </td>
 
-            <td><b>{r['talle']}</b></td>
+            <td>
+                <b>{r['talle']}</b>
+                <input type="hidden"
+                    name="talle[]"
+                    value="{r['talle']}">
+            </td>
 
             <td>
                 <input
                     type="number"
                     name="stock_{r['talle']}"
                     value="{r['stock']}"
-                    style="width:70px"
-                >
+                    style="width:70px">
             </td>
 
             <td align="center">
@@ -799,6 +839,17 @@ def talles_form(evento_id):
                 <b>{libres}</b>
             </td>
 
+            <td align="center">
+
+                <button
+                    type="button"
+                    class="eliminar"
+                    onclick="eliminarTalle({evento_id},{r['id']})">
+                    🗑️
+                </button>
+
+            </td>
+
         </tr>
         """
 
@@ -807,11 +858,127 @@ def talles_form(evento_id):
 
     <br>
 
-    <button>
+    <button type="button" onclick="agregarTalle()">
+    ➕ Agregar talle
+    </button>
+
+    &nbsp;
+
+    <button type="submit">
     💾 Guardar cambios
     </button>
 
     </form>
+
+    <script>
+
+    fila.innerHTML = `
+        <td align="center">
+            <input
+                type="checkbox"
+                checked
+                disabled>
+        </td>
+
+        <td>
+            <input
+                type="text"
+                name="nuevo_talle[]"
+                style="width:80px"
+                required>
+        </td>
+
+        <td>
+            <input
+                type="number"
+                name="nuevo_stock[]"
+                value="0"
+                min="0"
+                style="width:70px">
+        </td>
+
+        <td align="center">0</td>
+
+        <td align="center">0</td>
+
+        <td align="center">
+            <button
+                type="button"
+                onclick="eliminarFila(this)">
+                🗑️
+            </button>
+        </td>
+    `;
+    }
+    
+    </script>
+    <script>
+
+    function agregarTalle(){
+
+        let tabla = document.getElementById("tabla_talles");
+
+        let fila = tabla.insertRow(-1);
+
+        fila.innerHTML = `
+        <td align="center">
+            <input
+                type="checkbox"
+                checked
+                disabled>
+        </td>
+
+        <td>
+            <input
+                type="text"
+                name="nuevo_talle[]"
+                style="width:80px"
+                required>
+        </td>
+
+        <td>
+            <input
+                type="number"
+                name="nuevo_stock[]"
+                value="0"
+                min="0"
+                style="width:70px">
+        </td>
+
+        <td align="center">0</td>
+
+        <td align="center">0</td>
+
+        <td align="center">
+            <button
+                type="button"
+                onclick="eliminarFila(this)">
+                🗑️
+            </button>
+        </td>
+        `;
+    }
+
+    function eliminarTalle(evento,id){
+
+        if(confirm("¿Eliminar este talle?")){
+
+            window.location =
+            "/evento/" + evento + "/eliminar_talle/" + id;
+
+        }
+
+    }
+
+    function eliminarFila(btn){
+
+        if(confirm("¿Eliminar este talle?")){
+            btn.closest("tr").remove();
+        }
+
+    }
+
+    </script>
     """
 
     return layout(salida,evento_id=evento_id)
@@ -822,7 +989,7 @@ def guardar_stock(evento_id):
     cursor = conn.cursor(dictionary=True)
 
     cursor.execute("""
-    SELECT talle
+    SELECT id,talle
     FROM stock_remeras
     WHERE evento_id=%s
     """,(evento_id,))
@@ -832,13 +999,38 @@ def guardar_stock(evento_id):
     for t in talles:
 
         stock = request.form.get(f"stock_{t['talle']}")
+        activo = 1 if request.form.get(f"activo_{t['id']}") else 0
 
         cursor.execute("""
         UPDATE stock_remeras
-        SET stock=%s
-        WHERE evento_id=%s
-        AND talle=%s
-        """,(stock,evento_id,t["talle"]))
+        SET stock=%s,
+            activo=%s
+        WHERE id=%s
+        """, (
+            stock,
+            activo,
+            t["id"]
+        ))
+
+    nuevos_talles = request.form.getlist("nuevo_talle[]")
+    nuevos_stock = request.form.getlist("nuevo_stock[]")
+
+    for talle, stock in zip(nuevos_talles, nuevos_stock):
+
+        talle = talle.strip()
+
+        if talle == "":
+            continue
+
+        cursor.execute("""
+            INSERT INTO stock_remeras
+            (evento_id, talle, stock)
+            VALUES (%s,%s,%s)
+        """, (
+            evento_id,
+            talle,
+            stock
+        ))    
 
     conn.commit()
 
@@ -846,6 +1038,57 @@ def guardar_stock(evento_id):
     conn.close()
 
     return redirect(f"/evento/{evento_id}/talles_form")
+@organizador_bp.route("/evento/<int:evento_id>/eliminar_talle/<int:id>")
+def eliminar_talle(evento_id, id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    # Buscar el talle
+    cursor.execute("""
+    SELECT talle
+    FROM stock_remeras
+    WHERE id=%s
+    """, (id,))
+
+    registro = cursor.fetchone()
+
+    if not registro:
+        cursor.close()
+        conn.close()
+        return redirect(f"/evento/{evento_id}/talles_form")
+
+    talle = registro["talle"]
+
+    # Verificar si tiene ventas pagadas
+    cursor.execute("""
+    SELECT COUNT(*) AS total
+    FROM inscripciones
+    WHERE evento_id=%s
+    AND talle_remera=%s
+    AND estado_pago IN ('pagado','bonificado')
+    """, (evento_id, talle))
+
+    total = cursor.fetchone()["total"]
+
+    if total == 0:
+
+        cursor.execute("""
+        DELETE FROM stock_remeras
+        WHERE id=%s
+        """, (id,))
+
+        conn.commit()
+
+        cursor.close()
+        conn.close()
+
+        return redirect(f"/evento/{evento_id}/talles_form")
+
+    cursor.close()
+    conn.close()
+
+    return redirect(f"/evento/{evento_id}/talles_form?error=vendido")
 @organizador_bp.route("/corredores")
 def ver_corredores():
 
