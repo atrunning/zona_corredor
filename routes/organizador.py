@@ -8,7 +8,7 @@ from flask import send_file
 from openpyxl import Workbook
 import io
 from flask import session, redirect
-
+from datetime import datetime
 organizador_bp = Blueprint("organizador", __name__)
 
 
@@ -2517,6 +2517,20 @@ def editar_inscripcion(numero):
     Fecha nacimiento<br>
     <input type="date" name="fecha_nac" value="{ins.get('fecha_nac','')}"><br><br>
 
+        Fecha nacimiento<br>
+    <input type="date" name="fecha_nac" value="{ins.get('fecha_nac','')}"><br><br>
+
+    Género<br>
+    <select name="genero">
+        <option value="">Seleccione...</option>
+        <option value="M" {"selected" if ins.get("genero")=="M" else ""}>Masculino</option>
+        <option value="F" {"selected" if ins.get("genero")=="F" else ""}>Femenino</option>
+        <option value="X" {"selected" if ins.get("genero")=="X" else ""}>Otro</option>
+    </select><br><br>
+
+    Edad<br>
+    <input type="text" id="edad" readonly style="background:#eee"><br><br>
+
     Edad<br>
     <input type="text" id="edad" readonly style="background:#eee"><br><br>
 
@@ -3526,6 +3540,397 @@ def subir_imagen_simple():
     return jsonify({
         "url": url
     })
+@organizador_bp.route("/evento/<int:evento_id>/cupones")
+def pantalla_cupones(evento_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+        SELECT *
+        FROM cupones
+        WHERE evento_id=%s
+        ORDER BY clave
+    """, (evento_id,))
+
+    cupones = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+
+    salida = f"""
+
+    <a href="/evento/{evento_id}/panel">
+        <button style="margin-bottom:15px;">
+            ⬅ Volver al panel
+        </button>
+    </a>
+
+    <h2>🎟️ Cupones de descuento</h2>
+
+    <a href="/evento/{evento_id}/nuevo_cupon">
+        <button>➕ Nuevo cupón</button>
+    </a>
+
+    <br><br>
+
+    <table border="1" cellpadding="8" style="border-collapse:collapse;width:100%">
+
+    <tr style="background:#efefef">
+        <th>Código</th>
+        <th>Desc.</th>
+        <th>Desde</th>
+        <th>Hasta</th>
+        <th>Usos</th>
+        <th>Activo</th>
+        <th>Acciones</th>
+    </tr>
+    """
+
+    for c in cupones:
+
+        if c["max_usos"]:
+            usos = f"{c['usos']} / {c['max_usos']}"
+        else:
+            usos = f"{c['usos']} / ∞"
+
+        salida += f"""
+        <tr>
+
+        <td>{c['clave']}</td>
+
+        <td>{c['descuento']}%</td>
+
+        <td>{c['fecha_desde']}</td>
+
+        <td>{c['fecha_hasta']}</td>
+
+        <td>{usos}</td>
+
+
+        <td>{"🟢 Activo" if c["activo"] else "🔴 Inactivo"}</td>
+
+        
+        <td>
+
+        <a href="/evento/{evento_id}/editar_cupon/{c['id']}">
+        ✏️
+        </a>
+
+        &nbsp;
+
+        <a href="/evento/{evento_id}/eliminar_cupon/{c['id']}"
+        onclick="return confirm('¿Eliminar este cupón?')">
+
+        🗑️
+
+        </a>
+
+        </td>
+
+        </tr>
+        """
+
+    salida += "</table>"
+
+    return layout(salida, evento_id=evento_id)
+@organizador_bp.route("/evento/<int:evento_id>/nuevo_cupon")
+def nuevo_cupon(evento_id):
+
+    hoy = datetime.now().strftime("%Y-%m-%d")
+
+    salida = f"""
+    <h2>➕ Nuevo cupón</h2>
+
+    <form method="POST" action="/evento/{evento_id}/guardar_cupon">
+
+    Código<br>
+    <input type="text" name="clave" required
+           style="width:250px"><br><br>
+
+    Descuento (%)<br>
+    <input type="number" name="descuento"
+           min="1" max="100"
+           required><br><br>
+
+    Fecha desde<br>
+    <input type="date"
+           name="fecha_desde"
+           value="{hoy}"
+           required><br><br>
+
+    Fecha hasta<br>
+    <input type="date"
+           name="fecha_hasta"
+           value="{hoy}"
+           required><br><br>
+
+    Máximo de usos<br>
+    <input type="number"
+           name="max_usos"
+           placeholder="Vacío = ilimitado"><br><br>
+
+    <label>
+        <input type="checkbox"
+               name="activo"
+               checked>
+        Activo
+    </label>
+
+    <br><br>
+
+    <button type="submit">
+        💾 Guardar cupón
+    </button>
+
+    </form>
+    """
+
+    return layout(salida, evento_id=evento_id)
+@organizador_bp.route("/evento/<int:evento_id>/guardar_cupon", methods=["POST"])
+def guardar_cupon(evento_id):
+
+    clave = request.form["clave"].strip().upper()
+
+    descuento = request.form["descuento"]
+
+    fecha_desde = request.form["fecha_desde"]
+
+    fecha_hasta = request.form["fecha_hasta"]
+
+    max_usos = request.form.get("max_usos")
+
+    activo = 1 if request.form.get("activo") else 0
+
+    if max_usos == "":
+        max_usos = None
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # Verificar si ya existe el código para este evento
+    cursor.execute("""
+        SELECT id
+        FROM cupones
+        WHERE evento_id=%s
+        AND UPPER(clave)=UPPER(%s)
+    """, (evento_id, clave))
+
+    if cursor.fetchone():
+
+        cursor.close()
+        conn.close()
+
+        salida = f"""
+        <h2>⚠ Cupón duplicado</h2>
+
+        Ya existe un cupón con el código:
+
+        <h3>{clave}</h3>
+
+        <br>
+
+        <a href="/evento/{evento_id}/nuevo_cupon">
+            <button>Volver</button>
+        </a>
+        """
+
+    return layout(salida, evento_id=evento_id)
+
+    cursor.execute("""
+        INSERT INTO cupones
+        (
+            evento_id,
+            clave,
+            descuento,
+            fecha_desde,
+            fecha_hasta,
+            activo,
+            max_usos,
+            usos
+        )
+        VALUES
+        (%s,%s,%s,%s,%s,%s,%s,0)
+    """, (
+        evento_id,
+        clave,
+        descuento,
+        fecha_desde,
+        fecha_hasta,
+        activo,
+        max_usos
+    ))
+
+    conn.commit()
+
+    cursor.close()
+    conn.close()
+
+    return redirect(f"/evento/{evento_id}/cupones")
+@organizador_bp.route("/evento/<int:evento_id>/editar_cupon/<int:cupon_id>")
+def editar_cupon(evento_id, cupon_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+        SELECT *
+        FROM cupones
+        WHERE id=%s
+    """,(cupon_id,))
+
+    c = cursor.fetchone()
+
+    cursor.close()
+    conn.close()
+
+    checked = "checked" if c["activo"] else ""
+
+    max_usos = c["max_usos"] if c["max_usos"] else ""
+
+    salida = f"""
+    <h2>✏️ Editar cupón</h2>
+
+    <form method="POST"
+          action="/evento/{evento_id}/guardar_edicion_cupon/{cupon_id}">
+
+    Código<br>
+    <input type="text"
+           name="clave"
+           value="{c['clave']}"
+           required><br><br>
+
+    Descuento (%)<br>
+    <input type="number"
+           name="descuento"
+           value="{c['descuento']}"
+           min="1"
+           max="100"
+           required><br><br>
+
+    Fecha desde<br>
+    <input type="date"
+           name="fecha_desde"
+           value="{c['fecha_desde']}"><br><br>
+
+    Fecha hasta<br>
+    <input type="date"
+           name="fecha_hasta"
+           value="{c['fecha_hasta']}"><br><br>
+
+    Máximo usos<br>
+    <input type="number"
+           name="max_usos"
+           value="{max_usos}"><br><br>
+
+    <label>
+        <input type="checkbox"
+               name="activo"
+               {checked}>
+        Activo
+    </label>
+
+    <br><br>
+
+    <button>
+        💾 Guardar cambios
+    </button>
+
+    </form>
+    """
+
+    return layout(salida, evento_id=evento_id)
+@organizador_bp.route("/evento/<int:evento_id>/guardar_edicion_cupon/<int:cupon_id>", methods=["POST"])
+def guardar_edicion_cupon(evento_id, cupon_id):
+
+    clave = request.form["clave"].strip().upper()
+    descuento = request.form["descuento"]
+    fecha_desde = request.form["fecha_desde"]
+    fecha_hasta = request.form["fecha_hasta"]
+
+    max_usos = request.form.get("max_usos")
+    if max_usos == "":
+        max_usos = None
+
+    activo = 1 if request.form.get("activo") else 0
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # Verificar si ya existe otro cupón con el mismo código
+    cursor.execute("""
+        SELECT id
+        FROM cupones
+        WHERE evento_id=%s
+        AND UPPER(clave)=UPPER(%s)
+        AND id<>%s
+    """, (evento_id, clave, cupon_id))
+
+    if cursor.fetchone():
+
+        cursor.close()
+        conn.close()
+
+        salida = f"""
+        <h2>⚠ Cupón duplicado</h2>
+
+        Ya existe otro cupón con el código:
+
+        <h3>{clave}</h3>
+
+        <br>
+
+        <a href="/evento/{evento_id}/cupones">
+            <button>Volver</button>
+        </a>
+        """
+
+    return layout(salida, evento_id=evento_id)
+
+    cursor.execute("""
+        UPDATE cupones
+        SET
+            clave=%s,
+            descuento=%s,
+            fecha_desde=%s,
+            fecha_hasta=%s,
+            max_usos=%s,
+            activo=%s
+        WHERE id=%s
+    """,(
+        clave,
+        descuento,
+        fecha_desde,
+        fecha_hasta,
+        max_usos,
+        activo,
+        cupon_id
+    ))
+
+    conn.commit()
+
+    cursor.close()
+    conn.close()
+
+    return redirect(f"/evento/{evento_id}/cupones")
+
+@organizador_bp.route("/evento/<int:evento_id>/eliminar_cupon/<int:cupon_id>")
+def eliminar_cupon(evento_id, cupon_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        DELETE FROM cupones
+        WHERE id=%s
+    """,(cupon_id,))
+
+    conn.commit()
+
+    cursor.close()
+    conn.close()
+
+    return redirect(f"/evento/{evento_id}/cupones")
 @organizador_bp.route("/evento/<int:evento_id>/exportar_excel")
 def exportar_excel(evento_id):
 

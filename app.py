@@ -43,7 +43,7 @@ def slugify(texto):
 
 app.register_blueprint(organizador_bp)
 app.register_blueprint(eventos_bp)
-print("🔥 VERSION NUEVA 1.3 🔥")
+print("🔥 VERSION NUEVA 1.5 🔥")
 
 def layout(contenido, menu=True, evento_id=None, eventos=None):
 
@@ -69,7 +69,7 @@ def layout(contenido, menu=True, evento_id=None, eventos=None):
             <a href="/evento/{evento_id}/inscriptos">Inscriptos</a><br><br>
             <a href="/evento/{evento_id}/exportar">Exportar inscriptos</a><br><br>
             <a href="/evento/{evento_id}/exportar_seguro">Exportar seguro</a><br><br>
-            <a href="/evento/{evento_id}/reporte_remeras">Reporte de remeras</a><br><br>
+            <li><a href="/organizador/{{ evento.id }}/cupones">Cupones de descuento</a></li>
             <a href="/evento/{evento_id}/talles_form">👕 Configurar talles</a><br><br>
 
             <hr>
