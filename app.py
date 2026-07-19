@@ -7,7 +7,7 @@ app = Flask(__name__)
 app.secret_key = "12356"
 from routes.organizador import organizador_bp
 from routes.eventos import eventos_bp
-from flask import session, redirect
+from flask import session, redirect, url_for
 import re
 from routes.pagos import pagos_bp
 app.register_blueprint(pagos_bp)
@@ -43,7 +43,7 @@ def slugify(texto):
 
 app.register_blueprint(organizador_bp)
 app.register_blueprint(eventos_bp)
-print("🔥 VERSION NUEVA 1.5 🔥")
+print("🔥 VERSION NUEVA 1.6 🔥")
 
 def layout(contenido, menu=True, evento_id=None, eventos=None):
 
@@ -800,7 +800,16 @@ def pagar_mp(numero):
     }
 
     preference_response = sdk.preference().create(preference_data)
+
+    print(preference_response)
+
+    if preference_response["status"] != 201:
+        return str(preference_response)
+
     preference = preference_response["response"]
+
+    if "init_point" not in preference:
+        return str(preference)
 
     return redirect(preference["init_point"])
 @app.route("/evento/<int:evento_id>/pagar", methods=["GET", "POST"])
@@ -908,8 +917,10 @@ def pagar_evento(evento_id):
             estado_texto = "💰 Pago confirmado ✅"
             boton = ""
 
-        else:
+        elif estado == "pendiente":
+
             estado_texto = "💰 Pago pendiente 🟡"
+
             boton = f"""
             <br><br>
             <a href="/pagar_mp/{i['numero_inscripcion']}">
@@ -926,6 +937,49 @@ def pagar_evento(evento_id):
                 </button>
             </a>
             """
+
+        elif estado == "vencido":
+
+            estado_texto = """
+            <span style="
+                background:#d32f2f;
+                color:white;
+                padding:8px 16px;
+                border-radius:10px;
+                font-weight:bold;
+                display:inline-block;
+                font-size:16px;
+            ">
+            🔴 Pago vencido
+            </span>
+
+            <br><br>
+
+            Tu orden de pago venció.<br>
+            Generá una nueva para completar la inscripción.
+            """
+
+            boton = f"""
+            <br><br>
+            <a href="/reactivar_pago/{i['numero_inscripcion']}">
+                <button style="
+                padding:12px 24px;
+                background:#1976d2;
+                color:white;
+                border:none;
+                border-radius:8px;
+                font-size:16px;
+                cursor:pointer;
+                ">
+                🔄 Generar nuevo pago
+                </button>
+            </a>
+            """
+
+        else:
+
+            estado_texto = estado
+            boton = ""        
        
         salida += f"""
         <div style="
@@ -964,7 +1018,26 @@ def pagar_evento(evento_id):
         """
 
     return salida
-    
+@app.route("/reactivar_pago/<numero>")
+def reactivar_pago(numero):
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    UPDATE inscripciones
+    SET estado_pago='pendiente',
+        fecha_inscripcion=NOW()
+    WHERE numero_inscripcion=%s
+    AND estado_pago='vencido'
+    """, (numero,))
+
+    conn.commit()
+
+    cursor.close()
+    conn.close()
+
+    return redirect(url_for("pagar_mp", numero=numero))    
 @app.route("/evento/<int:evento_id>/verificar", methods=["POST"])
 def verificar_evento(evento_id):
 
@@ -1017,16 +1090,21 @@ def verificar_evento(evento_id):
     precio = float(fila["precio"])
     estado_pago = fila["estado_pago"]
 
+    
     if precio == 0:
+
         estado = "💰 Inscripción gratuita ✅"
         boton = ""
 
     elif estado_pago in ["pagado", "aprobado"]:
+
         estado = "💰 Pago confirmado ✅"
         boton = ""
 
-    else:
+    elif estado_pago == "pendiente":
+
         estado = "💰 Pago pendiente 🟡"
+
         boton = f"""
         <br><br>
         <a href="/pagar_mp/{fila['numero_inscripcion']}">
@@ -1042,6 +1120,47 @@ def verificar_evento(evento_id):
             </button>
         </a>
         """
+
+    elif estado_pago == "vencido":
+
+        estado = """
+        <span style="
+            background:#d32f2f;
+            color:white;
+            padding:8px 16px;
+            border-radius:10px;
+            font-weight:bold;
+            display:inline-block;
+        ">
+        🔴 Pago vencido
+        </span>
+
+        <br><br>
+
+        Tu orden de pago venció.<br>
+        Generá una nueva para completar la inscripción.
+        """
+
+        boton = f"""
+        <br><br>
+        <a href="/reactivar_pago/{fila['numero_inscripcion']}">
+            <button style="
+            padding:12px 22px;
+            background:#1976d2;
+            color:white;
+            border:none;
+            border-radius:8px;
+            cursor:pointer;
+            ">
+            🔄 Generar nuevo pago
+            </button>
+        </a>
+        """
+
+    else:
+
+        estado = estado_pago
+        boton = ""    
 
     return f"""
     <div style="
@@ -2222,14 +2341,20 @@ def inscribirse(evento_id):
         distancia_id = request.form["distancia_id"]
 
         cursor.execute("""
-        SELECT nombre, incluye_remera
+        SELECT
+            nombre,
+            incluye_remera,
+            participantes_por_inscripcion
         FROM distancias
-        WHERE id = %s AND evento_id = %s
+        WHERE id = %s
+        AND evento_id = %s
         """, (distancia_id, evento_id))
 
         distancia = cursor.fetchone()
-        
 
+        participantes = distancia.get("participantes_por_inscripcion", 1)
+        
+        formulario_corredores = ""
         salida = f"""
         <div style="max-width:600px;margin:40px auto;font-family:Arial">
 
@@ -2331,6 +2456,88 @@ def inscribirse(evento_id):
         style="padding:10px;border:1px solid #ccc;border-radius:6px;">
         """
         print("FORM:", request.form)
+
+        if participantes > 1:
+
+            salida += """
+            <hr style="margin:40px 0">
+
+            <h2>👤 Participante 2</h2>
+
+            <input type="text"
+                name="dni2"
+                placeholder="DNI"
+                maxlength="8"
+                pattern="[0-9]{7,8}"
+                required
+                style="padding:10px;border:1px solid #ccc;border-radius:6px;">
+
+            <input type="text"
+                name="nombre2"
+                placeholder="Nombre"
+                required
+                style="padding:10px;border:1px solid #ccc;border-radius:6px;">
+
+            <input type="text"
+                name="apellido2"
+                placeholder="Apellido"
+                required
+                style="padding:10px;border:1px solid #ccc;border-radius:6px;">
+
+            Fecha nacimiento<br>
+
+            <input
+                type="date"
+                id="fecha_nacimiento2"
+                name="fecha_nacimiento2"
+                required
+                style="padding:10px;border:1px solid #ccc;border-radius:6px;">
+
+            Edad<br>
+
+            <input
+                type="text"
+                id="edad2"
+                readonly
+                style="
+                padding:10px;
+                border:1px solid #ccc;
+                border-radius:6px;
+                background:#eee;">
+
+            <select
+                name="genero2"
+                required
+                style="padding:10px;border-radius:6px;">
+
+                <option value="">Seleccionar sexo</option>
+                <option value="M">Masculino</option>
+                <option value="F">Femenino</option>
+
+            </select>
+
+            <script>
+
+            document.getElementById("fecha_nacimiento2").addEventListener("change", function(){
+
+                let nacimiento = new Date(this.value);
+
+                let hoy = new Date();
+
+                let edad = hoy.getFullYear() - nacimiento.getFullYear();
+
+                let m = hoy.getMonth() - nacimiento.getMonth();
+
+                if(m < 0 || (m === 0 && hoy.getDate() < nacimiento.getDate())){
+                    edad--;
+                }
+
+                document.getElementById("edad2").value = edad;
+
+            });
+
+            </script>
+            """
         # 👕 Remera
         if str(distancia.get("incluye_remera")) == "1":
 
@@ -2696,6 +2903,21 @@ def inscribirse(evento_id):
         email = request.form["email"]
         celular = request.form["celular"]
 
+        # Participante 2
+        dni2 = request.form.get("dni2", "").strip()
+        nombre2 = request.form.get("nombre2", "").strip()
+        apellido2 = request.form.get("apellido2", "").strip()
+        fecha_nacimiento2 = request.form.get("fecha_nacimiento2", "").strip()
+        genero2 = request.form.get("genero2", "").strip().upper()
+
+        print("================================")
+        print("DNI2:", dni2)
+        print("Nombre2:", nombre2)
+        print("Apellido2:", apellido2)
+        print("Fecha2:", fecha_nacimiento2)
+        print("Genero2:", genero2)
+        print("================================")
+
         fecha_nacimiento = request.form.get("fecha_nacimiento", "").strip()
         
         edad_evento = edad        
@@ -2733,12 +2955,16 @@ def inscribirse(evento_id):
         cursor = conn.cursor(dictionary=True)
 
         cursor.execute("""
-        SELECT incluye_remera
+        SELECT incluye_remera,
+            participantes_por_inscripcion
         FROM distancias
         WHERE id = %s
         """, (distancia_id,))
 
         datos = cursor.fetchone()
+        print(datos)
+
+        participantes = datos.get("participantes_por_inscripcion", 1)
 
         if datos["incluye_remera"] == 0:
             talle_remera = None
@@ -2871,6 +3097,46 @@ def inscribirse(evento_id):
 
         conn.commit()
 
+        # ==========================
+        # PARTICIPANTE 2
+        # ==========================
+        print("PARTICIPANTES:", participantes, type(participantes))
+        print("DNI2:", dni2)
+        if participantes > 1 and dni2:
+
+            cursor.execute(
+                "SELECT id FROM personas WHERE dni=%s",
+                (dni2,)
+            )
+
+            persona2 = cursor.fetchone()
+
+            print("PERSONA2:", persona2)
+
+            if not persona2:
+
+                cursor.execute("""
+                INSERT INTO personas
+                (dni,nombre,apellido,fecha_nac,genero)
+                VALUES (%s,%s,%s,%s,%s)
+                """,(
+                    dni2,
+                    nombre2.upper(),
+                    apellido2.upper(),
+                    fecha_nacimiento2,
+                    genero2
+                ))
+
+                conn.commit()
+
+                persona2_id = cursor.lastrowid
+
+            else:
+
+                persona2_id = persona2["id"]
+
+            print("ID PERSONA2:", persona2_id)
+
         # verificar inscripción previa
         cursor.execute("""
             SELECT id, estado_pago 
@@ -3002,6 +3268,30 @@ def inscribirse(evento_id):
         conn.commit()
 
         inscripcion_id = cursor.lastrowid
+        # Vincular participantes a la inscripción
+        cursor.execute("""
+        INSERT INTO inscripcion_participantes
+        (inscripcion_id, persona_id, orden)
+        VALUES (%s,%s,%s)
+        """, (
+            inscripcion_id,
+            persona_id,
+            1
+        ))
+
+        if participantes > 1 and dni2:
+
+            cursor.execute("""
+            INSERT INTO inscripcion_participantes
+            (inscripcion_id, persona_id, orden)
+            VALUES (%s,%s,%s)
+            """, (
+                inscripcion_id,
+                persona2_id,
+                2
+            ))
+
+        conn.commit()
 
         # -------------------------
         # GUARDAR CAMPOS EXTRA
@@ -3170,8 +3460,20 @@ def panel_evento(evento_id):
     if "organizador_id" not in session:
         return redirect("/login")
 
+    
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+    UPDATE inscripciones
+    SET estado_pago = 'vencido'
+    WHERE estado_pago = 'pendiente'
+    AND fecha_inscripcion < DATE_SUB(NOW(), INTERVAL 15 DAY)
+    """)
+
+    conn.commit()
+
+    
     # -------------------
     # datos del evento
     # -------------------
@@ -3209,7 +3511,9 @@ def panel_evento(evento_id):
     SELECT COUNT(*) AS total
     FROM inscripciones
     WHERE evento_id = %s
-    """,(evento_id,))
+    AND estado_pago <> 'vencido'
+    """, (evento_id,))
+
     total_inscriptos = cursor.fetchone()["total"]
 
     # -------------------
@@ -3558,6 +3862,22 @@ def editar_distancia(evento_id, distancia_id):
 
         Edad máxima<br>
         <input type="number" name="edad_max" value="{d.get('edad_max') or ''}"><br><br>
+
+        Cantidad de participantes<br>
+
+        <select name="participantes_por_inscripcion">
+            <option value="1"
+                {"selected" if d.get("participantes_por_inscripcion",1)==1 else ""}>
+                Individual
+            </option>
+
+            <option value="2"
+                {"selected" if d.get("participantes_por_inscripcion",1)==2 else ""}>
+                Pareja
+            </option>
+        </select>
+
+        <br><br>
                 <br>
                 <button type="submit">Guardar</button>
 
@@ -3579,6 +3899,10 @@ def editar_distancia(evento_id, distancia_id):
     edad_min = request.form.get("edad_min")
     edad_max = request.form.get("edad_max")
 
+    participantes_por_inscripcion = request.form.get(
+    "participantes_por_inscripcion", 1
+)
+
     validar_edad = 1 if validar_edad else 0
 
     if not validar_edad:
@@ -3596,9 +3920,23 @@ def editar_distancia(evento_id, distancia_id):
         es_gratis=%s,
         validar_edad=%s,
         edad_min=%s,
-        edad_max=%s
+        edad_max=%s,
+        participantes_por_inscripcion=%s
     WHERE id=%s
-    """,(nombre,cupo,precio,inicio,fin,remera,gratis,validar_edad,edad_min,edad_max,distancia_id))
+    """,(
+        nombre,
+        cupo,
+        precio,
+        inicio,
+        fin,
+        remera,
+        gratis,
+        validar_edad,
+        edad_min,
+        edad_max,
+        participantes_por_inscripcion,
+        distancia_id
+    ))
 
     conn.commit()
 

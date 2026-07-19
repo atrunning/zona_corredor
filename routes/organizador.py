@@ -15,6 +15,7 @@ organizador_bp = Blueprint("organizador", __name__)
 @organizador_bp.route("/evento/<int:evento_id>/inscriptos")
 def ver_inscriptos(evento_id):
     tab = request.args.get("tab") or "resumen"
+    mostrar_vencidos = request.args.get("mostrar_vencidos") == "1"
 
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
@@ -56,37 +57,52 @@ def ver_inscriptos(evento_id):
     GROUP BY d.id
     """, (evento_id, evento_id))
 
+    
     distancias = cursor.fetchall()
+
+    cursor.execute("""
+    SELECT COUNT(*) AS total
+    FROM inscripciones
+    WHERE evento_id = %s
+    AND estado_pago = 'vencido'
+    """, (evento_id,))
+
+    total_vencidos = cursor.fetchone()["total"]
     
     
     # ---------------------------
     # Listado completo
     # ---------------------------
 
-    cursor.execute("""
-        SELECT
-            i.id,
-            i.numero_inscripcion,
-            i.fecha_inscripcion,
-            i.dorsal,
-            p.nombre,
-            p.apellido,
-            p.dni,
-            p.fecha_nac,
-            d.nombre AS distancia,
-            p.email,
-            p.celular,
-            i.estado_pago,
-            t.nombre AS team
-        FROM inscripciones i
-        JOIN personas p ON p.id = i.persona_id
-        JOIN distancias d ON d.id = i.distancia_id
-        LEFT JOIN teams t ON p.team_id = t.id
-        WHERE i.evento_id = %s
-        ORDER BY i.fecha_inscripcion DESC
-    """, (evento_id,))
+    sql = """
+    SELECT
+        i.id,
+        i.numero_inscripcion,
+        i.fecha_inscripcion,
+        i.dorsal,
+        p.nombre,
+        p.apellido,
+        p.dni,
+        p.fecha_nac,
+        d.nombre AS distancia,
+        p.email,
+        p.celular,
+        i.estado_pago,
+        t.nombre AS team
+    FROM inscripciones i
+    JOIN personas p ON p.id = i.persona_id
+    JOIN distancias d ON d.id = i.distancia_id
+    LEFT JOIN teams t ON p.team_id = t.id
+    WHERE i.evento_id = %s
+    """
 
-    inscriptos = cursor.fetchall()
+    if not mostrar_vencidos:
+        sql += " AND i.estado_pago <> 'vencido' "
+
+    sql += " ORDER BY i.fecha_inscripcion DESC "
+
+    cursor.execute(sql, (evento_id,))
+    inscriptos = cursor.fetchall()    
 
     # ---------------------------
     # Campos extra del evento
@@ -160,8 +176,18 @@ def ver_inscriptos(evento_id):
 
     salida += "</div>"
 
-    salida += """
+    salida += f"""
     <div style="margin-bottom:10px">
+
+    <label>
+    <input type="checkbox"
+    {"checked" if mostrar_vencidos else ""}
+    onchange="window.location='?mostrar_vencidos='+(this.checked?1:0)">
+    Mostrar vencidos ({total_vencidos})
+    
+    </label>
+
+    <br><br>
 
     <input type="text" id="buscar"
     placeholder="Buscar por nombre, DNI o email..."
@@ -200,8 +226,7 @@ def ver_inscriptos(evento_id):
         </div>
         """
 
-    salida += "<h2>Listado de inscriptos</h2>"
-
+    
     salida += """
     <div style="
     max-height:60vh;
