@@ -1563,11 +1563,7 @@ def ver_evento(evento_id):
     """,(evento_id,))
     distancias = cursor.fetchall()
 
-    cursor.execute("SELECT DATABASE()")
-    print("DB:", cursor.fetchone())
-
-    cursor.execute("SHOW COLUMNS FROM distancias")
-    print("COLUMNAS:", cursor.fetchall())
+      
    
     salida = f"""
     <div style="max-width:1000px;margin:auto;padding:20px">
@@ -1595,13 +1591,10 @@ def ver_evento(evento_id):
         salida += f"""
         <div style="flex:1">
 
-            <iframe
-            src="https://www.google.com/maps?q={evento['latitud']},{evento['longitud']}&output=embed"
-            width="100%"
-            height="320"
-            style="border:0;border-radius:10px"
-            loading="lazy">
-            </iframe>
+            <div
+            id="mapa_evento"
+            style="width:100%;height:320px;border-radius:10px">
+            </div>
 
             <div style="margin-top:10px;text-align:center">
 
@@ -1840,6 +1833,7 @@ def ver_evento(evento_id):
 
     """
 
+        
     salida += """
     <div style="
         max-width:900px;
@@ -2027,6 +2021,41 @@ def ver_evento(evento_id):
 
     </script>
     """
+    if evento.get("latitud") and evento.get("longitud"):
+
+        salida += """
+        <link rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        """
+
+        salida += f"""
+        <script>
+
+        window.addEventListener("load", function() {{
+
+            const mapa = L.map("mapa_evento").setView(
+                [{evento["latitud"]}, {evento["longitud"]}],
+                15
+            );
+
+            L.tileLayer(
+                "https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png",
+                {{
+                    maxZoom:19,
+                    attribution:"© OpenStreetMap"
+                }}
+            ).addTo(mapa);
+
+            L.marker(
+                [{evento["latitud"]}, {evento["longitud"]}]
+            ).addTo(mapa);
+
+        }});
+
+        </script>
+        """
     return layout(salida, menu=False)
 @app.route("/evento/<int:evento_id>/recordar_pendientes", methods=["POST"])
 def recordar_pendientes(evento_id):

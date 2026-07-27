@@ -3406,9 +3406,19 @@ def editar_evento(evento_id):
 
     <h3>Ubicación del evento</h3>
 
-    <input type="text" id="direccion" name="direccion"
-    value="{evento.get('direccion','')}"
-    style="width:400px"><br><br>
+    <input type="text"
+        id="direccion"
+        name="direccion"
+        value="{evento.get('direccion','')}"
+        style="width:330px">
+
+    <button
+        type="button"
+        onclick="buscarDireccion()">
+        🔍 
+    </button>
+
+    <br><br>
 
     <input type="hidden" id="latitud" name="latitud"
     value="{evento.get('latitud','')}">
@@ -3534,54 +3544,121 @@ def editar_evento(evento_id):
     </script>
     """
 
+    salida += """
+    <link rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
     
+    """
         
 
     # =========================
     # MAPA
     # =========================
-    salida += f"""
-    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAO2tAZ13XqjSbEPBk7CUqybYU3PBajFGk&libraries=places&callback=initMap" async defer></script>
 
+    salida += """
+    <link rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    """
+
+    salida += f"""
     <script>
-    function initMap() {{
+
+    let map;
+    let marker;
+
+    window.addEventListener("load", function() {{
 
         let lat = {evento.get("latitud") or -34.8};
         let lng = {evento.get("longitud") or -58.3};
 
-        const map = new google.maps.Map(document.getElementById("map"), {{
-            center: {{ lat: lat, lng: lng }},
-            zoom: 15
-        }});
+        map = L.map("map").setView([lat, lng], 15);
 
-        const marker = new google.maps.Marker({{
-            position: {{ lat: lat, lng: lng }},
-            map: map,
+        L.tileLayer(
+            "https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png",
+            {{
+                maxZoom: 19,
+                attribution: "© OpenStreetMap"
+            }}
+        ).addTo(map);
+
+        marker = L.marker([lat, lng], {{
             draggable: true
+        }}).addTo(map);
+
+        // Arrastrar marcador
+        marker.on("dragend", function() {{
+
+            let p = marker.getLatLng();
+
+            document.getElementById("latitud").value = p.lat;
+            document.getElementById("longitud").value = p.lng;
+
         }});
 
-        marker.addListener("dragend", function () {{
-            document.getElementById("latitud").value = marker.getPosition().lat();
-            document.getElementById("longitud").value = marker.getPosition().lng();
+        // Click sobre el mapa
+        map.on("click", function(e) {{
+
+            marker.setLatLng(e.latlng);
+
+            document.getElementById("latitud").value = e.latlng.lat;
+            document.getElementById("longitud").value = e.latlng.lng;
+
         }});
 
-        const input = document.getElementById("direccion");
-        const autocomplete = new google.maps.places.Autocomplete(input);
+    }});
 
-        autocomplete.addListener("place_changed", function () {{
-            const place = autocomplete.getPlace();
 
-            if (!place.geometry) return;
+    // =========================
+    // Buscar dirección
+    // =========================
 
-            map.setCenter(place.geometry.location);
-            marker.setPosition(place.geometry.location);
+    async function buscarDireccion() {{
 
-            document.getElementById("latitud").value = place.geometry.location.lat();
-            document.getElementById("longitud").value = place.geometry.location.lng();
-        }});
+        let direccion = document.getElementById("direccion").value.trim();
+
+        if (!direccion) return;
+
+        let resp = await fetch(
+            "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" +
+            encodeURIComponent(direccion)
+        );
+
+        let datos = await resp.json();
+
+        if (datos.length == 0) {{
+            alert("Dirección no encontrada.");
+            return;
+        }}
+
+        let lat = parseFloat(datos[0].lat);
+        let lng = parseFloat(datos[0].lon);
+
+        map.setView([lat, lng], 16);
+
+        marker.setLatLng([lat, lng]);
+
+        document.getElementById("latitud").value = lat;
+        document.getElementById("longitud").value = lng;
+
     }}
+    document
+    .getElementById("direccion")
+    .addEventListener("keydown", function(e){{
 
-    
+        if(e.key=="Enter"){{
+
+            e.preventDefault();
+
+            buscarDireccion();
+
+        }}
+
+    }});
     </script>
     """
 
