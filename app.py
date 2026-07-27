@@ -43,7 +43,7 @@ def slugify(texto):
 
 app.register_blueprint(organizador_bp)
 app.register_blueprint(eventos_bp)
-print("🔥 VERSION NUEVA 1.6 🔥")
+print("🔥 VERSION NUEVA 1.6.1 🔥")
 
 def layout(contenido, menu=True, evento_id=None, eventos=None):
 

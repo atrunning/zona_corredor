@@ -493,7 +493,8 @@ def inscripcion_manual(evento_id):
         apellido = request.form.get("apellido")
         email = request.form.get("email")
         celular = request.form.get("celular")
-        fecha_nac = request.form.get("fecha_nac") or "2000-01-01"
+        genero = request.form.get("genero")
+        fecha_nac = request.form.get("fecha_nac") or None
         distancia_id = request.form.get("distancia_id")
 
         # Buscar persona
@@ -505,14 +506,46 @@ def inscripcion_manual(evento_id):
 
             cursor.execute("""
                 UPDATE personas
-                SET nombre=%s, apellido=%s, email=%s, celular=%s
+                SET
+                    nombre=%s,
+                    apellido=%s,
+                    email=%s,
+                    celular=%s,
+                    genero=%s,
+                    fecha_nac=%s
                 WHERE id=%s
-            """, (nombre, apellido, email, celular, persona_id))
+            """, (
+                nombre,
+                apellido,
+                email,
+                celular,
+                genero,
+                fecha_nac,
+                persona_id
+            ))
         else:
+            
             cursor.execute("""
-                INSERT INTO personas (nombre, apellido, dni, email, celular, fecha_nac)
-                VALUES (%s,%s,%s,%s,%s,%s)
-            """, (nombre, apellido, dni, email, celular, "2000-01-01"))
+                INSERT INTO personas
+                (
+                    nombre,
+                    apellido,
+                    dni,
+                    email,
+                    celular,
+                    genero,
+                    fecha_nac
+                )
+                VALUES (%s,%s,%s,%s,%s,%s,%s)
+            """, (
+                nombre,
+                apellido,
+                dni,
+                email,
+                celular,
+                genero,
+                fecha_nac
+            ))
 
             persona_id = cursor.lastrowid
 
@@ -629,13 +662,52 @@ def inscripcion_manual(evento_id):
     <form method="POST">
 
     DNI<br>
-    <input name="dni"><br><br>
+
+    <input name="dni" id="dni" style="width:180px">
+
+    <button type="button" onclick="buscarPersona()">
+    🔍 Verificar
+    </button>
+
+    <div id="mensaje-persona"
+        style="margin-top:5px;font-weight:bold"></div>
+
+    <br><br>
 
     Nombre<br>
     <input name="nombre"><br><br>
 
     Apellido<br>
     <input name="apellido"><br><br>
+
+    Sexo<br>
+
+    <select name="genero">
+        <option value="">Seleccionar</option>
+        <option value="M">Masculino</option>
+        <option value="F">Femenino</option>
+    </select>
+
+    <br><br>
+
+    Fecha nacimiento<br>
+
+    <input
+    type="date"
+    name="fecha_nac"
+    id="fecha_nac"
+    onchange="calcularEdad()">
+
+    <br><br>
+
+    Edad<br>
+
+    <input
+    id="edad"
+    readonly
+    style="background:#eee">
+
+    <br><br>
 
     Email<br>
     <input name="email"><br><br>
@@ -655,103 +727,209 @@ def inscripcion_manual(evento_id):
     </form>
 
     <script>
-document.querySelector("input[name='dni']").addEventListener("blur", function(){{
 
-    let dni = this.value.trim()
+    async function buscarPersona(){{
 
-    if(!dni) return
+        let dni = document.getElementById("dni").value.trim();
 
-    fetch("/buscar_persona?dni=" + dni)
-    .then(r => r.json())
-    .then(data => {{
+        if(!dni) return;
 
-        if(data && data.nombre){{
+        let resp = await fetch("/evento/{evento_id}/buscar_persona?dni=" + dni);
 
-            document.querySelector("[name='nombre']").value = data.nombre || ""
-            document.querySelector("[name='apellido']").value = data.apellido || ""
-            document.querySelector("[name='email']").value = data.email || ""
-            document.querySelector("[name='celular']").value = data.celular || ""
+        let data = await resp.json();
 
-        }}
+        if(data.encontrado){{
 
-    }})
-}})
-</script>
+            document.querySelector("[name='nombre']").value = data.nombre || "";
+            document.querySelector("[name='apellido']").value = data.apellido || "";
+            document.querySelector("[name='email']").value = data.email || "";
+            document.querySelector("[name='celular']").value = data.celular || "";
+            document.querySelector("[name='genero']").value = data.genero || "";
+            document.getElementById("fecha_nac").value = data.fecha_nac || "";
 
-<script>
+            calcularEdad();
 
-async function cargarCampos(){{
+            if(data.ya_inscripto){{
 
-    let distancia = document.querySelector("[name='distancia_id']").value
+                document.getElementById("mensaje-persona").innerHTML =
+                    "⚠️ Esta persona ya está inscripta en este evento.";
 
-    let contenedor = document.getElementById("campos-extra")
+                document.getElementById("mensaje-persona").style.color = "red";
 
-    contenedor.innerHTML = ""
+            }}else{{
 
-    let resp = await fetch(`/distancia/${{distancia}}/campos_json`)
+                document.getElementById("mensaje-persona").innerHTML =
+                    "✅ Persona encontrada.";
 
-    let campos = await resp.json()
-    console.log(campos)
-    campos.forEach(campo => {{
-
-        let html = `<div style="margin-bottom:15px">`
-
-        html += `<label>${{campo.nombre}}</label><br>`
-
-        if(campo.tipo == "texto"){{
-
-            html += `
-            <input
-                type="text"
-                name="campo_${{campo.id}}"
-                ${{campo.obligatorio ? "required" : ""}}
-            >
-            `
-        }}
-
-        if(campo.tipo == "select"){{
-
-            html += `
-            <select
-                name="campo_${{campo.id}}"
-                ${{campo.obligatorio ? "required" : ""}}
-            >
-            `
-
-            html += `<option value="">Seleccionar</option>`
-
-            if(campo.opciones){{
-
-                campo.opciones.split(",").forEach(op => {{
-
-                    html += `
-                    <option value="${{op.trim()}}">
-                        ${{op.trim()}}
-                    </option>
-                    `
-                }})
+                document.getElementById("mensaje-persona").style.color = "green";
             }}
 
-            html += `</select>`
+        }}else{{
+
+            document.getElementById("mensaje-persona").innerHTML =
+                "🟠 Persona no encontrada. Complete los datos manualmente.";
+
+            document.getElementById("mensaje-persona").style.color = "orange";
+        }}
+    }}
+
+    function calcularEdad(){{
+
+        let fecha = document.getElementById("fecha_nac").value;
+
+        if(!fecha){{
+            document.getElementById("edad").value = "";
+            return;
         }}
 
-        html += `</div>`
+        let nacimiento = new Date(fecha);
+        let hoy = new Date();
 
-        contenedor.innerHTML += html
+        let edad = hoy.getFullYear() - nacimiento.getFullYear();
 
-    }})
+        let mes = hoy.getMonth() - nacimiento.getMonth();
 
-}}
+        if(mes < 0 || (mes == 0 && hoy.getDate() < nacimiento.getDate())){{
+            edad--;
+        }}
 
-document
-.querySelector("[name='distancia_id']")
-.addEventListener("change", cargarCampos)
+        document.getElementById("edad").value = edad;
+    }}
 
-window.addEventListener("load", cargarCampos)
+    </script>
 
-</script>
+    <script>
+
+    async function cargarCampos(){{
+
+        let distancia = document.querySelector("[name='distancia_id']").value;
+
+        let contenedor = document.getElementById("campos-extra");
+
+        contenedor.innerHTML = "";
+
+        let resp = await fetch(`/distancia/${{distancia}}/campos_json`);
+
+        let campos = await resp.json();
+
+        campos.forEach(campo => {{
+
+            let html = `<div style="margin-bottom:15px">`;
+
+            html += `<label>${{campo.nombre}}</label><br>`;
+
+            if(campo.tipo == "texto"){{
+
+                html += `
+                    <input
+                        type="text"
+                        name="campo_${{campo.id}}"
+                        ${{campo.obligatorio ? "required" : ""}}
+                    >
+                `;
+            }}
+
+            if(campo.tipo == "select"){{
+
+                html += `
+                    <select
+                        name="campo_${{campo.id}}"
+                        ${{campo.obligatorio ? "required" : ""}}
+                    >
+                `;
+
+                html += `<option value="">Seleccionar</option>`;
+
+                if(campo.opciones){{
+
+                    campo.opciones.split(",").forEach(op => {{
+
+                        html += `
+                            <option value="${{op.trim()}}">
+                                ${{op.trim()}}
+                            </option>
+                        `;
+                    }});
+                }}
+
+                html += `</select>`;
+            }}
+
+            html += `</div>`;
+
+            contenedor.innerHTML += html;
+
+        }});
+
+    }}
+
+    document
+    .querySelector("[name='distancia_id']")
+    .addEventListener("change", cargarCampos);
+
+    window.addEventListener("load", cargarCampos);
+
+    </script>
     
     """)
+@organizador_bp.route("/evento/<int:evento_id>/buscar_persona")
+def buscar_persona(evento_id):
+
+    dni = request.args.get("dni")
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+        SELECT *
+        FROM personas
+        WHERE dni=%s
+    """,(dni,))
+
+    persona = cursor.fetchone()
+    print(persona)
+
+    if not persona:
+
+        cursor.close()
+        conn.close()
+
+        return jsonify({
+            "encontrado": False
+        })
+
+    cursor.execute("""
+        SELECT id
+        FROM inscripciones
+        WHERE persona_id=%s
+        AND evento_id=%s
+    """,(persona["id"],evento_id))
+
+    ya = cursor.fetchone() is not None
+
+    cursor.close()
+    conn.close()
+
+    return jsonify({
+
+        "encontrado":True,
+
+        "ya_inscripto":ya,
+
+        "nombre":persona["nombre"],
+
+        "apellido":persona["apellido"],
+
+        "email":persona["email"],
+
+        "celular":persona["celular"],
+
+        "sexo":persona["genero"],
+
+        "fecha_nac":str(persona["fecha_nac"])
+                     if persona["fecha_nac"]
+                     else ""
+    })
 @organizador_bp.route("/evento/<int:evento_id>/talles_form")
 def talles_form(evento_id):
 
