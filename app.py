@@ -13,7 +13,6 @@ from routes.pagos import pagos_bp
 app.register_blueprint(pagos_bp)
 import os
 import mercadopago
-
 import requests
 from flask import request
 from decimal import Decimal
@@ -21,12 +20,16 @@ from flask import send_from_directory
 import os
 from mail import enviar_confirmacion, prueba_mail
 from mail import enviar_mail
+from flask import Blueprint, render_template, request, redirect, session
+from db import get_db_connection
 
 BASE_URL = os.getenv("BASE_URL", "http://localhost:5000")
 print("🔥 BASE_URL EN PRODUCCION:", BASE_URL)
 import qrcode
 import base64
 from io import BytesIO
+from routes.admin import admin_bp
+app.register_blueprint(admin_bp)
 def generar_qr_base64(texto):
     img = qrcode.make(texto)
 
@@ -43,7 +46,7 @@ def slugify(texto):
 
 app.register_blueprint(organizador_bp)
 app.register_blueprint(eventos_bp)
-print("🔥 VERSION NUEVA 1.6.1 🔥")
+print("🔥 VERSION NUEVA 1.6.2 🔥")
 
 def layout(contenido, menu=True, evento_id=None, eventos=None):
 
@@ -101,24 +104,45 @@ def layout(contenido, menu=True, evento_id=None, eventos=None):
     align-items:center;
     ">
 
-    <div style="display:flex; align-items:center; gap:15px;">
-        <img src="/static/logo.png" style="
-        height:60px;
-        background:white;
-        padding:px;
-        border-radius:10px;
-        box-shadow:0 2px 6px rgba(0,0,0,0.3);
+    <div style="display:flex; align-items:center;">
+
+        <a href="/" style="
+            display:flex;
+            align-items:center;
+            color:white;
+            text-decoration:none;
         ">
 
-        <span style="
-        font-size:22px;
-        font-weight:bold;
-        letter-spacing:1px;
-        ">
-        Zona Corredor
-        </span>
+            <img src="/static/logo.png"
+                style="height:60px">
+
+            <span style="
+                font-size:22px;
+                font-weight:bold;
+                letter-spacing:1px;
+                margin-left:15px;
+            ">
+                Zona Corredor
+            </span>
+
+        </a>
+
+        <a href="/admin/login"
+        title=""
+        style="
+                width:6px;
+                height:6px;
+                border-radius:50%;
+                background:#222;
+                margin-left:8px;
+                display:block;
+                transition:.2s;
+        "
+        onmouseover="this.style.background='#5dade2';this.style.transform='scale(1.4)'"
+        onmouseout="this.style.background='#222';this.style.transform='scale(1)'">
+        </a>
+
     </div>
-
     <div>
         
 
