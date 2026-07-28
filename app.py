@@ -71,6 +71,7 @@ def layout(contenido, menu=True, evento_id=None, eventos=None):
             <a href="/evento/{evento_id}/exportar_seguro">Exportar seguro</a><br><br>
             <a href="/evento/{evento_id}/cupones">🎟️ Cupones de descuento</a><br><br>
             <a href="/evento/{evento_id}/talles_form">👕 Configurar talles</a><br><br>
+            <a href="/evento/{evento_id}/estadisticas">📊 Estadísticas</a><br><br>
 
             <hr>
 
@@ -1507,7 +1508,27 @@ def ver_evento(evento_id):
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
+    origen = request.args.get("utm_source")
+
+    if origen:
+        session["utm_source"] = origen
+
+    origen = session.get("utm_source", "directo")
+
     cursor.execute("""
+    INSERT INTO visitas_evento
+    (evento_id, origen, ip)
+    VALUES (%s, %s, %s)
+    """, (
+        evento_id,
+        origen,
+        request.remote_addr
+    ))
+
+    conn.commit()
+
+    cursor.execute("""
+
         SELECT 
             e.*,
             o.nombre AS organizador
@@ -1518,6 +1539,29 @@ def ver_evento(evento_id):
     """, (evento_id,))
 
     evento = cursor.fetchone()
+
+    cursor.execute("""
+    SELECT
+        origen,
+        COUNT(*) AS total
+    FROM visitas_evento
+    WHERE evento_id = %s
+    GROUP BY origen
+    """, (evento_id,))
+
+    estadisticas_visitas = cursor.fetchall()
+
+
+    cursor.execute("""
+    SELECT
+        COUNT(*) AS total
+    FROM visitas_evento
+    WHERE evento_id = %s
+    """, (evento_id,))
+
+    total_visitas = cursor.fetchone()["total"]
+    print("TOTAL VISITAS:", total_visitas)
+    print("ESTADISTICAS:", estadisticas_visitas)
 
     cursor.execute("""
     SELECT access_token_mp
@@ -2227,7 +2271,56 @@ def reporte_remeras(evento_id):
     salida += "</table>"
 
     return layout(salida)
+@app.route("/evento/<int:evento_id>/estadisticas")
+def estadisticas_evento(evento_id):
 
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+        SELECT COUNT(*) total
+        FROM visitas_evento
+        WHERE evento_id=%s
+    """, (evento_id,))
+    total_visitas = cursor.fetchone()["total"]
+
+    cursor.execute("""
+        SELECT origen, COUNT(*) total
+        FROM visitas_evento
+        WHERE evento_id=%s
+        GROUP BY origen
+        ORDER BY total DESC
+    """, (evento_id,))
+    visitas = cursor.fetchall()
+
+    cursor.execute("""
+        SELECT origen, COUNT(*) total
+        FROM inscripciones
+        WHERE evento_id=%s
+        GROUP BY origen
+        ORDER BY total DESC
+    """, (evento_id,))
+    inscripciones = cursor.fetchall()
+
+    salida = f"""
+    <h2>📊 Estadísticas del evento</h2>
+
+    <h3>👀 Visitas totales: {total_visitas}</h3>
+
+    <h3>Visitas por origen</h3>
+    """
+
+    for fila in visitas:
+        salida += f"{fila['origen']}: {fila['total']}<br>"
+
+    salida += "<br><h3>Inscriptos por origen</h3>"
+
+    for fila in inscripciones:
+        salida += f"{fila['origen']}: {fila['total']}<br>"
+
+    conn.close()
+
+    return layout(salida, evento_id=evento_id)
 
 
 
@@ -3262,6 +3355,8 @@ def inscribirse(evento_id):
         # -----------------------------
 
         fecha_inscripcion = datetime.now(ZoneInfo("America/Argentina/Buenos_Aires")).strftime("%Y-%m-%d %H:%M:%S")
+
+        origen = session.get("utm_source", "directo")
         print("CUPON:", cupon)
         print("CUPON_ID:", cupon_id)
         cursor.execute("""
@@ -3276,9 +3371,10 @@ def inscribirse(evento_id):
             estado_pago,
             talle_remera,
             fecha_inscripcion,
-            cupon_id
+            cupon_id,
+            origen
         )
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """, (
             evento_id,
             persona_id,
@@ -3289,11 +3385,11 @@ def inscribirse(evento_id):
             "pendiente",
             talle_remera,
             fecha_inscripcion,
-            cupon_id
+            cupon_id,
+            origen
         ))
+              
         
-        
-        (evento_id, persona_id, distancia_id, edad_evento, email, celular, "pendiente", talle_remera, fecha_inscripcion)
         conn.commit()
 
         inscripcion_id = cursor.lastrowid
