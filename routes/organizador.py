@@ -4015,7 +4015,7 @@ def guardar_cupon(evento_id):
         </a>
         """
 
-    return layout(salida, evento_id=evento_id)
+        return layout(salida, evento_id=evento_id)
 
     cursor.execute("""
         INSERT INTO cupones
