@@ -4165,7 +4165,7 @@ def guardar_edicion_cupon(evento_id, cupon_id):
         </a>
         """
 
-    return layout(salida, evento_id=evento_id)
+        return layout(salida, evento_id=evento_id)
 
     cursor.execute("""
         UPDATE cupones
