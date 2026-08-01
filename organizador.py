@@ -1,0 +1,4624 @@
+from flask import Blueprint, request, jsonify, redirect
+from db import get_db_connection
+from layout import layout
+import os
+from werkzeug.utils import secure_filename
+from PIL import Image
+from flask import send_file
+from openpyxl import Workbook
+import io
+from flask import session, redirect
+from datetime import datetime
+organizador_bp = Blueprint("organizador", __name__)
+
+
+@organizador_bp.route("/evento/<int:evento_id>/inscriptos")
+def ver_inscriptos(evento_id):
+    tab = request.args.get("tab") or "resumen"
+    mostrar_vencidos = request.args.get("mostrar_vencidos") == "1"
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    # ---------------------------
+    # Total general del evento
+    # ---------------------------
+    cursor.execute("""
+        SELECT COUNT(*) AS total
+        FROM inscripciones
+        WHERE evento_id = %s
+    """, (evento_id,))
+    total_evento = cursor.fetchone()["total"]
+
+    # ---------------------------
+    # Totales por distancia
+    # ---------------------------
+    cursor.execute("""
+    SELECT 
+        d.id,
+        d.nombre,
+        d.cupo,
+
+        COUNT(i.id) AS total,
+
+        SUM(CASE WHEN i.estado_pago IN ('pagado','bonificado') THEN 1 ELSE 0 END) AS pagados,
+        SUM(CASE WHEN i.estado_pago = 'pendiente' THEN 1 ELSE 0 END) AS pendientes,
+        SUM(CASE WHEN i.estado_pago = 'vencido' THEN 1 ELSE 0 END) AS vencidos
+
+    FROM distancias d
+
+    LEFT JOIN inscripciones i
+        ON d.id = i.distancia_id
+        AND i.evento_id = %s
+
+    WHERE d.evento_id = %s
+    AND d.activo = 1
+                   
+    GROUP BY d.id
+    """, (evento_id, evento_id))
+
+    
+    distancias = cursor.fetchall()
+
+    cursor.execute("""
+    SELECT COUNT(*) AS total
+    FROM inscripciones
+    WHERE evento_id = %s
+    AND estado_pago = 'vencido'
+    """, (evento_id,))
+
+    total_vencidos = cursor.fetchone()["total"]
+    
+    
+    # ---------------------------
+    # Listado completo
+    # ---------------------------
+
+    sql = """
+    SELECT
+        i.id,
+        i.numero_inscripcion,
+        i.fecha_inscripcion,
+        i.dorsal,
+        p.nombre,
+        p.apellido,
+        p.dni,
+        p.fecha_nac,
+        d.nombre AS distancia,
+        p.email,
+        p.celular,
+        i.estado_pago,
+        t.nombre AS team
+    FROM inscripciones i
+    JOIN personas p ON p.id = i.persona_id
+    JOIN distancias d ON d.id = i.distancia_id
+    LEFT JOIN teams t ON p.team_id = t.id
+    WHERE i.evento_id = %s
+    """
+
+    if not mostrar_vencidos:
+        sql += " AND i.estado_pago <> 'vencido' "
+
+    sql += " ORDER BY i.fecha_inscripcion DESC "
+
+    cursor.execute(sql, (evento_id,))
+    inscriptos = cursor.fetchall()    
+
+    # ---------------------------
+    # Campos extra del evento
+    # ---------------------------
+
+    cursor.execute("""
+    SELECT
+        dc.id,
+        dc.nombre
+    FROM distancia_campos dc
+    JOIN distancias d
+        ON d.id = dc.distancia_id
+    WHERE d.evento_id = %s
+    ORDER BY dc.id
+    """, (evento_id,))
+
+    campos_extra = cursor.fetchall()
+    print("CAMPOS EXTRA:", campos_extra)
+
+    
+
+    salida = f"""
+    <a href="/evento/{evento_id}/panel" style="
+    display:inline-block;
+    margin-bottom:15px;
+    padding:8px 15px;
+    background:#1976d2;
+    color:white;
+    border-radius:6px;
+    text-decoration:none;
+    ">
+    ← Volver al panel
+    </a>
+
+    <h1>Inscriptos del evento</h1>
+    """
+
+    # -------------------
+    # RESUMEN
+    # -------------------
+
+    salida += f"""
+    
+
+    <input type="hidden" name="tab" id="tab_actual" value="{tab}">
+
+    <div id="resumen" style="display:none">
+    """
+    
+    salida += "<div style='display:flex;gap:20px;flex-wrap:wrap;margin-bottom:30px'>"
+
+    for d in distancias:
+
+        salida += f"""
+        <div style='
+        background:#f5f5f5;
+        padding:15px;
+        border-radius:10px;
+        width:220px;
+        border-left:6px solid #1976d2;
+        '>
+        <b>{d['nombre']}</b><br><br>
+
+        Total: {"{:,.0f}".format(d['total']).replace(",", ".")}<br>
+        <span style='color:green'>Pagados: {d['pagados']}</span><br>
+        <span style='color:orange'>Pendientes: {d['pendientes']}</span><br>
+        <span style='color:red'>Vencidos: {d['vencidos']}</span>
+
+        </div>
+        """
+
+    salida += "</div>"
+
+    salida += f"""
+    <div style="margin-bottom:15px">
+
+        <label>
+            <input type="checkbox"
+            {"checked" if mostrar_vencidos else ""}
+            onchange="window.location='?mostrar_vencidos='+(this.checked?1:0)">
+            Mostrar vencidos ({total_vencidos})
+        </label>
+
+        <br><br>
+
+        <div style="display:flex; align-items:center; gap:15px;">
+
+            <input type="text"
+                id="buscar"
+                placeholder="Buscar por nombre, DNI o email..."
+                style="
+                    padding:8px;
+                    width:380px;
+                    border:1px solid #ccc;
+                    border-radius:6px;
+                    height:38px;
+                    box-sizing:border-box;
+                ">
+
+            <input type="text"
+                id="buscar_referencia"
+                placeholder="Referencia MP"
+                onkeyup="buscarReferencia()"
+                style="
+                    padding:8px;
+                    width:220px;
+                    border:1px solid #ccc;
+                    border-radius:6px;
+                    height:38px;
+                    box-sizing:border-box;
+                ">
+
+        </div>
+
+    </div>
+    """
+    salida += f"""
+    <script>
+
+    function buscarReferencia() {{
+
+        let referencia = document.getElementById("buscar_referencia").value.trim();
+
+        console.log("Referencia:", referencia);
+
+        if (referencia == "") {{
+
+            document.querySelectorAll("table tr").forEach(function(fila) {{
+                fila.style.display = "";
+            }});
+
+            return;
+        }}
+
+        console.log("/evento/{{evento_id}}/buscar_referencia?referencia=" + referencia);
+        
+        fetch("/evento/{evento_id}/buscar_referencia?referencia=" + encodeURIComponent(referencia))
+        .then(response => response.json())
+        .then(data => {{
+
+            if (data.ok) {{
+
+                let buscar = document.getElementById("buscar");
+
+                buscar.value = data.numero_inscripcion;
+
+                buscar.dispatchEvent(new Event("keyup"));
+
+            }}
+
+        }})
+        .catch(error => {{
+            console.error(error);
+            alert("Error al buscar la referencia.");
+        }});
+
+    </script>
+    """
+
+    # -----------------------
+    # TABLA INSCRIPTOS
+    # -----------------------
+    salida += f"""
+        <div style="display:flex;justify-content:space-between;align-items:center;margin:20px 0;">
+
+            <h2>Listado de inscriptos</h2>
+
+            <a href="/evento/{evento_id}/inscripcion_manual">
+                <button style="
+                    background:#2e7d32;
+                    color:white;
+                    border:none;
+                    padding:12px 18px;
+                    border-radius:8px;
+                    font-weight:bold;
+                    cursor:pointer;
+                ">
+                    ➕ Inscripción nueva
+                </button>
+            </a>
+
+        </div>
+        """
+
+    
+    salida += """
+    <div style="
+    max-height:60vh;
+    overflow-y:auto;
+    border:1px solid #ccc;
+    border-radius:6px
+    ">
+
+    <table id="tabla_inscriptos"
+    style="
+    border-collapse:collapse;
+    width:100%;
+    font-size:13px
+    " border="1" cellpadding="6">
+    """
+
+    salida += """
+    <tr style="background:#eee">
+    <th>Código</th>
+    <th>Fecha</th>
+    <th>Nombre</th>
+    <th>Email</th>
+    <th>Documento</th>
+    <th>Edad</th>
+    <th>Competición</th>
+    <th>Team</th>
+    <th>Número</th>
+    <th>Estado</th>
+    """
+
+    for campo in campos_extra:
+        salida += f"<th>{campo['nombre']}</th>"
+
+    salida += """
+
+    <th>Editar</th>
+        </tr>
+        """
+        
+
+    for ins in inscriptos:
+        print("TEAM RAW:", ins.get("team"))
+        # 🔥 LIMPIAR TEAM PRIMERO
+        team = ins.get("team")
+
+        if team:
+            team = team.strip()
+            if team.lower() == "none" or team == "":
+                team = "Sin equipo"
+        else:
+            team = "Sin equipo"
+
+        # resto de lógica
+        edad = "-"
+
+        if ins["fecha_nac"]:
+            from datetime import date
+            edad = date.today().year - ins["fecha_nac"].year 
+
+        estado_db = ins["estado_pago"]
+
+        if estado_db == "pagado":
+            estado = "<span style='background:#4caf50;color:white;padding:4px 8px;border-radius:4px'>Pagado</span>"
+        elif estado_db == "pendiente":
+            estado = "<span style='background:#ff9800;color:white;padding:4px 8px;border-radius:4px'>Pendiente</span>"
+        elif estado_db == "bonificado":
+             estado = "<span style='background:#2196F3;color:white;padding:4px 8px;border-radius:4px'>🎁 Bonificado</span>"    
+        elif estado_db == "vencido":
+            estado = "<span style='background:#f44336;color:white;padding:4px 8px;border-radius:4px'>Vencido</span>"
+        else:
+            estado = estado_db
+
+        fecha = ins["fecha_inscripcion"].strftime("%d/%m/%Y %H:%M")
+
+        # ---------------------------
+        # Respuestas campos extra
+        # ---------------------------
+
+        cursor.execute("""
+        SELECT campo_id, valor
+        FROM inscripcion_respuestas
+        WHERE inscripcion_id = %s
+        """, (ins["id"],))
+
+        respuestas_db = cursor.fetchall()
+
+        respuestas = {}
+
+        for r in respuestas_db:
+            respuestas[r["campo_id"]] = r["valor"]
+
+        # 👇 RECIÉN ACÁ LO USÁS
+        
+        salida += f"""
+        <tr id="fila_{ins['numero_inscripcion']}">
+        <td>{ins['numero_inscripcion']}</td>
+        <td>{fecha}</td>
+        <td>{ins['nombre']} {ins['apellido']}</td>
+        <td>{ins['email']}</td>
+        <td>{ins['dni']}</td>
+        <td>{edad}</td>
+        <td>{ins['distancia']}</td>
+        <td>{team}</td>
+        <td>{ins['dorsal'] if ins['dorsal'] else '-'}</td>
+        <td>{estado}</td>
+        """
+
+        for campo in campos_extra:
+
+            valor = respuestas.get(campo["id"], "-")
+
+            salida += f"<td>{valor}</td>"
+
+        salida += f"""
+        <td>
+
+        <a href="/inscripcion/{ins['numero_inscripcion']}">
+        <button type="button">✏️</button>
+        </a>
+
+        <a href="/inscripcion/{ins['numero_inscripcion']}/eliminar"
+        onclick="return confirm('¿Eliminar esta inscripción?');">
+        <button type="button">🗑️</button>
+        </a>
+
+        </td>
+
+        </tr>
+        """
+
+    salida += "</table></div>"
+
+    
+
+    salida += """
+    <script>
+
+    document.getElementById("buscar").addEventListener("keyup", function(){
+
+        let filtro = this.value.toLowerCase()
+
+        let filas = document.querySelectorAll("#tabla_inscriptos tr")
+
+        filas.forEach(function(fila, index){
+
+            if(index === 0) return   // salta el encabezado
+
+            let texto = fila.innerText.toLowerCase()
+
+            if(texto.includes(filtro)){
+                fila.style.display = ""
+            } else {
+                fila.style.display = "none"
+            }
+
+        })
+
+    })
+
+    </script>
+    """
+    salida += f"""
+    <script>
+
+    function mostrar(seccion) {{
+
+        let resumen = document.getElementById("resumen");
+
+        if(resumen) resumen.style.display = "none";
+
+        if(seccion === "resumen") {{
+            if(resumen) resumen.style.display = "block";
+        }}
+    }}
+
+    window.onload = function() {{
+        mostrar("{tab}");
+    }}
+
+    </script>
+    """     
+    cursor.close()
+    conn.close()
+
+    return layout(salida)
+@organizador_bp.route("/evento/<int:evento_id>/buscar_referencia")
+def buscar_referencia(evento_id):
+
+    referencia = request.args.get("referencia", "").strip()
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+        SELECT i.numero_inscripcion
+        FROM pagos p
+        JOIN inscripciones i
+            ON i.id = p.inscripcion_id
+        WHERE i.evento_id = %s
+          AND p.referencia_externa = %s
+        LIMIT 1
+    """, (evento_id, referencia))
+
+    fila = cursor.fetchone()
+
+    cursor.close()
+    conn.close()
+
+    if fila:
+        return jsonify({
+            "ok": True,
+            "numero_inscripcion": fila["numero_inscripcion"]
+        })
+
+    return jsonify({"ok": False})
+@organizador_bp.route("/inscripcion/<numero>/eliminar")
+def eliminar_inscripcion(numero):
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+    SELECT id, evento_id
+    FROM inscripciones
+    WHERE numero_inscripcion = %s
+    """, (numero,))
+
+    ins = cursor.fetchone()
+
+    if not ins:
+        cursor.close()
+        conn.close()
+        return "Inscripción no encontrada"
+    
+    cursor.execute("""
+    SELECT COUNT(*) AS total
+    FROM pagos
+    WHERE inscripcion_id = %s
+    AND estado IN ('pagado','aprobado')
+    """, (ins["id"],))
+
+    pagos = cursor.fetchone()
+
+    if pagos["total"] > 0:
+        cursor.close()
+        conn.close()
+
+        return """
+        <script>
+        alert("No se puede eliminar porque la inscripción tiene un pago registrado.");
+        history.back();
+        </script>
+        """
+
+    # Borrar respuestas
+    cursor.execute("""
+    DELETE FROM inscripcion_respuestas
+    WHERE inscripcion_id = %s
+    """, (ins["id"],))
+
+    # Borrar pagos pendientes (si existen)
+    cursor.execute("""
+    DELETE FROM pagos
+    WHERE inscripcion_id = %s
+    """, (ins["id"],))
+
+    # Borrar inscripción
+    cursor.execute("""
+    DELETE FROM inscripciones
+    WHERE id = %s
+    """, (ins["id"],))
+
+    conn.commit()
+
+    evento_id = ins["evento_id"]
+
+    cursor.close()
+    conn.close()
+
+    return redirect(f"/evento/{evento_id}/inscriptos")
+@organizador_bp.route("/evento/<int:evento_id>/inscripcion_manual", methods=["GET","POST"])
+def inscripcion_manual(evento_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    # =========================
+    # POST → guardar inscripción
+    # =========================
+    if request.method == "POST":
+
+        dni = request.form.get("dni")
+        nombre = request.form.get("nombre")
+        apellido = request.form.get("apellido")
+        email = request.form.get("email")
+        celular = request.form.get("celular")
+        genero = request.form.get("genero")
+        fecha_nac = request.form.get("fecha_nac") or None
+        distancia_id = request.form.get("distancia_id")
+
+        # Buscar persona
+        cursor.execute("SELECT id FROM personas WHERE dni=%s", (dni,))
+        p = cursor.fetchone()
+
+        if p:
+            persona_id = p["id"]
+
+            cursor.execute("""
+                UPDATE personas
+                SET
+                    nombre=%s,
+                    apellido=%s,
+                    email=%s,
+                    celular=%s,
+                    genero=%s,
+                    fecha_nac=%s
+                WHERE id=%s
+            """, (
+                nombre,
+                apellido,
+                email,
+                celular,
+                genero,
+                fecha_nac,
+                persona_id
+            ))
+        else:
+            
+            cursor.execute("""
+                INSERT INTO personas
+                (
+                    nombre,
+                    apellido,
+                    dni,
+                    email,
+                    celular,
+                    genero,
+                    fecha_nac
+                )
+                VALUES (%s,%s,%s,%s,%s,%s,%s)
+            """, (
+                nombre,
+                apellido,
+                dni,
+                email,
+                celular,
+                genero,
+                fecha_nac
+            ))
+
+            persona_id = cursor.lastrowid
+
+        cursor.execute("""
+            SELECT id FROM inscripciones
+            WHERE persona_id=%s AND evento_id=%s
+        """, (persona_id, evento_id))
+
+        if cursor.fetchone():
+            cursor.close()
+            conn.close()
+            return "⚠️ Esta persona ya está inscripta en este evento"    
+
+        cupon_id = None
+
+        codigo_cupon = request.form.get("cupon")
+
+        if codigo_cupon:
+
+            cursor.execute("""
+            SELECT id
+            FROM cupones
+            WHERE clave = %s
+            AND activo = 1
+            AND CURDATE() BETWEEN fecha_desde AND fecha_hasta
+            """, (codigo_cupon,))
+
+            cup = cursor.fetchone()
+
+            if cup:
+                cupon_id = cup["id"]
+        # Crear inscripción SIN numero primero
+        cursor.execute("""
+        INSERT INTO inscripciones
+        (
+            persona_id,
+            evento_id,
+            distancia_id,
+            estado_pago,
+            fecha_inscripcion,
+            cupon_id
+        )
+        VALUES (%s,%s,%s,'pendiente',NOW(),%s)
+        """, (
+            persona_id,
+            evento_id,
+            distancia_id,
+            cupon_id
+        ))
+
+        inscripcion_id = cursor.lastrowid
+
+        cursor.execute("""
+        SELECT *
+        FROM distancia_campos
+        WHERE distancia_id = %s
+        """, (distancia_id,))
+
+        campos = cursor.fetchall()
+
+        for campo in campos:
+
+            valor = request.form.get(f"campo_{campo['id']}")
+
+            cursor.execute("""
+            INSERT INTO inscripcion_respuestas
+            (inscripcion_id, campo_id, valor)
+            VALUES (%s,%s,%s)
+            """, (
+                inscripcion_id,
+                campo["id"],
+                valor
+            ))
+
+        # Generar numero seguro (único)
+        numero = f"{evento_id}-{str(inscripcion_id).zfill(8)}"
+
+        # Actualizar numero_inscripcion
+        cursor.execute("""
+            UPDATE inscripciones
+            SET numero_inscripcion=%s
+            WHERE id=%s
+        """, (numero, inscripcion_id))
+
+        conn.commit()
+
+        cursor.close()
+        conn.close()
+
+        return redirect(f"/evento/{evento_id}/inscriptos")
+        
+
+    # =========================
+    # GET → mostrar formulario
+    # =========================
+    cursor.execute("""
+        SELECT id, nombre, precio
+        FROM distancias
+        WHERE evento_id = %s AND activo = 1
+    """, (evento_id,))
+
+    distancias = cursor.fetchall()
+
+    opciones = ""
+    for d in distancias:
+        opciones += f"<option value='{d['id']}'>{d['nombre']} - ${d['precio']}</option>"
+
+    cursor.close()
+    conn.close()
+
+    return layout(f"""
+    <h2>➕ Inscripción manual</h2>
+
+    <form method="POST">
+
+    DNI<br>
+
+    <input name="dni" id="dni" style="width:180px">
+
+    <button type="button" onclick="buscarPersona()">
+    🔍 Verificar
+    </button>
+
+    <div id="mensaje-persona"
+        style="margin-top:5px;font-weight:bold"></div>
+
+    <br><br>
+
+    Nombre<br>
+    <input name="nombre"><br><br>
+
+    Apellido<br>
+    <input name="apellido"><br><br>
+
+    Sexo<br>
+
+    <select name="genero">
+        <option value="">Seleccionar</option>
+        <option value="M">Masculino</option>
+        <option value="F">Femenino</option>
+    </select>
+
+    <br><br>
+
+    Fecha nacimiento<br>
+
+    <input
+    type="date"
+    name="fecha_nac"
+    id="fecha_nac"
+    onchange="calcularEdad()">
+
+    <br><br>
+
+    Edad<br>
+
+    <input
+    id="edad"
+    readonly
+    style="background:#eee">
+
+    <br><br>
+
+    Email<br>
+    <input name="email"><br><br>
+
+    Celular<br>
+    <input name="celular"><br><br>
+
+    Distancia<br>
+    <select name="distancia_id">
+    {opciones}
+    </select><br><br>
+
+    <div id="campos-extra"></div>
+
+    <button>Guardar</button>
+
+    </form>
+
+    <script>
+
+    async function buscarPersona(){{
+
+        let dni = document.getElementById("dni").value.trim();
+
+        if(!dni) return;
+
+        let resp = await fetch("/evento/{evento_id}/buscar_persona?dni=" + dni);
+
+        let data = await resp.json();
+
+        if(data.encontrado){{
+
+            document.querySelector("[name='nombre']").value = data.nombre || "";
+            document.querySelector("[name='apellido']").value = data.apellido || "";
+            document.querySelector("[name='email']").value = data.email || "";
+            document.querySelector("[name='celular']").value = data.celular || "";
+            document.querySelector("[name='genero']").value = data.genero || "";
+            document.getElementById("fecha_nac").value = data.fecha_nac || "";
+
+            calcularEdad();
+
+            if(data.ya_inscripto){{
+
+                document.getElementById("mensaje-persona").innerHTML =
+                    "⚠️ Esta persona ya está inscripta en este evento.";
+
+                document.getElementById("mensaje-persona").style.color = "red";
+
+            }}else{{
+
+                document.getElementById("mensaje-persona").innerHTML =
+                    "✅ Persona encontrada.";
+
+                document.getElementById("mensaje-persona").style.color = "green";
+            }}
+
+        }}else{{
+
+            document.getElementById("mensaje-persona").innerHTML =
+                "🟠 Persona no encontrada. Complete los datos manualmente.";
+
+            document.getElementById("mensaje-persona").style.color = "orange";
+        }}
+    }}
+
+    function calcularEdad(){{
+
+        let fecha = document.getElementById("fecha_nac").value;
+
+        if(!fecha){{
+            document.getElementById("edad").value = "";
+            return;
+        }}
+
+        let nacimiento = new Date(fecha);
+        let hoy = new Date();
+
+        let edad = hoy.getFullYear() - nacimiento.getFullYear();
+
+        let mes = hoy.getMonth() - nacimiento.getMonth();
+
+        if(mes < 0 || (mes == 0 && hoy.getDate() < nacimiento.getDate())){{
+            edad--;
+        }}
+
+        document.getElementById("edad").value = edad;
+    }}
+
+    </script>
+
+    <script>
+
+    async function cargarCampos(){{
+
+        let distancia = document.querySelector("[name='distancia_id']").value;
+
+        let contenedor = document.getElementById("campos-extra");
+
+        contenedor.innerHTML = "";
+
+        let resp = await fetch(`/distancia/${{distancia}}/campos_json`);
+
+        let campos = await resp.json();
+
+        campos.forEach(campo => {{
+
+            let html = `<div style="margin-bottom:15px">`;
+
+            html += `<label>${{campo.nombre}}</label><br>`;
+
+            if(campo.tipo == "texto"){{
+
+                html += `
+                    <input
+                        type="text"
+                        name="campo_${{campo.id}}"
+                        ${{campo.obligatorio ? "required" : ""}}
+                    >
+                `;
+            }}
+
+            if(campo.tipo == "select"){{
+
+                html += `
+                    <select
+                        name="campo_${{campo.id}}"
+                        ${{campo.obligatorio ? "required" : ""}}
+                    >
+                `;
+
+                html += `<option value="">Seleccionar</option>`;
+
+                if(campo.opciones){{
+
+                    campo.opciones.split(",").forEach(op => {{
+
+                        html += `
+                            <option value="${{op.trim()}}">
+                                ${{op.trim()}}
+                            </option>
+                        `;
+                    }});
+                }}
+
+                html += `</select>`;
+            }}
+
+            html += `</div>`;
+
+            contenedor.innerHTML += html;
+
+        }});
+
+    }}
+
+    document
+    .querySelector("[name='distancia_id']")
+    .addEventListener("change", cargarCampos);
+
+    window.addEventListener("load", cargarCampos);
+
+    </script>
+    
+    """)
+@organizador_bp.route("/evento/<int:evento_id>/buscar_persona")
+def buscar_persona(evento_id):
+
+    dni = request.args.get("dni")
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+        SELECT *
+        FROM personas
+        WHERE dni=%s
+    """,(dni,))
+
+    persona = cursor.fetchone()
+    print(persona)
+
+    if not persona:
+
+        cursor.close()
+        conn.close()
+
+        return jsonify({
+            "encontrado": False
+        })
+
+    cursor.execute("""
+        SELECT id
+        FROM inscripciones
+        WHERE persona_id=%s
+        AND evento_id=%s
+    """,(persona["id"],evento_id))
+
+    ya = cursor.fetchone() is not None
+
+    cursor.close()
+    conn.close()
+
+    return jsonify({
+
+        "encontrado":True,
+
+        "ya_inscripto":ya,
+
+        "nombre":persona["nombre"],
+
+        "apellido":persona["apellido"],
+
+        "email":persona["email"],
+
+        "celular":persona["celular"],
+
+        "sexo":persona["genero"],
+
+        "fecha_nac":str(persona["fecha_nac"])
+                     if persona["fecha_nac"]
+                     else ""
+    })
+@organizador_bp.route("/evento/<int:evento_id>/talles_form")
+def talles_form(evento_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+    SELECT
+        sr.id,
+        sr.talle,
+        sr.stock,
+        sr.activo,
+        COUNT(i.id) AS vendidos
+
+    FROM stock_remeras sr
+
+    LEFT JOIN inscripciones i
+        ON i.evento_id = sr.evento_id
+        AND UPPER(i.talle_remera) = UPPER(sr.talle)
+        AND i.estado_pago IN ('pagado','bonificado')
+
+    WHERE sr.evento_id = %s
+
+    GROUP BY
+        sr.id,
+        sr.talle,
+        sr.stock,
+        sr.activo
+
+    ORDER BY FIELD(sr.talle,'XS','S','M','L','XL','XXL','XXXL')
+    """, (evento_id,))               
+
+    remeras = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+    
+    error = request.args.get("error")
+
+    salida = f"""
+    <h2>👕 Stock de remeras</h2>
+    """
+    if error == "vendido":
+        salida += """
+        <div style="
+            background:#ffe6e6;
+            color:#900;
+            border:1px solid #cc0000;
+            padding:10px;
+            margin:10px 0;
+            border-radius:5px;
+            font-weight:bold;">
+            ⚠️ No se puede eliminar el talle porque ya tiene remeras asignadas.
+            Puede desactivarlo si no desea ofrecerlo.
+        </div>
+        """
+    salida += f"""
+    <form method="POST" action="/evento/{evento_id}/guardar_stock">
+
+    <table id="tabla_talles"
+    border="1"
+    cellpadding="8"
+    style="border-collapse:collapse">
+
+    <tr style="background:#eee">
+        <th>Activo</th>
+        <th>Talle</th>
+        <th>Stock</th>
+        <th>Vendidas</th>
+        <th>Disponibles</th>
+        <th>Acción</th>
+    </tr>
+    """
+
+    for r in remeras:
+    
+        checked = "checked" if r["activo"] else ""
+
+        libres = r["stock"] - r["vendidos"]
+
+        salida += f"""
+        <tr>
+            <td align="center">
+            <input
+                type="checkbox"
+                name="activo_{r['id']}"
+                {checked}>
+            </td>
+
+            <td>
+                <b>{r['talle']}</b>
+                <input type="hidden"
+                    name="talle[]"
+                    value="{r['talle']}">
+            </td>
+
+            <td>
+                <input
+                    type="number"
+                    name="stock_{r['talle']}"
+                    value="{r['stock']}"
+                    style="width:70px">
+            </td>
+
+            <td align="center">
+                {r['vendidos']}
+            </td>
+
+            <td align="center">
+                <b>{libres}</b>
+            </td>
+
+            <td align="center">
+
+                <button
+                    type="button"
+                    class="eliminar"
+                    onclick="eliminarTalle({evento_id},{r['id']})">
+                    🗑️
+                </button>
+
+            </td>
+
+        </tr>
+        """
+
+    salida += """
+    </table>
+
+    <br>
+
+    <button type="button" onclick="agregarTalle()">
+    ➕ Agregar talle
+    </button>
+
+    &nbsp;
+
+    <button type="submit">
+    💾 Guardar cambios
+    </button>
+
+    </form>
+
+    <script>
+
+    fila.innerHTML = `
+        <td align="center">
+            <input
+                type="checkbox"
+                checked
+                disabled>
+        </td>
+
+        <td>
+            <input
+                type="text"
+                name="nuevo_talle[]"
+                style="width:80px"
+                required>
+        </td>
+
+        <td>
+            <input
+                type="number"
+                name="nuevo_stock[]"
+                value="0"
+                min="0"
+                style="width:70px">
+        </td>
+
+        <td align="center">0</td>
+
+        <td align="center">0</td>
+
+        <td align="center">
+            <button
+                type="button"
+                onclick="eliminarFila(this)">
+                🗑️
+            </button>
+        </td>
+    `;
+    }
+    
+    </script>
+    <script>
+
+    function agregarTalle(){
+
+        let tabla = document.getElementById("tabla_talles");
+
+        let fila = tabla.insertRow(-1);
+
+        fila.innerHTML = `
+        <td align="center">
+            <input
+                type="checkbox"
+                checked
+                disabled>
+        </td>
+
+        <td>
+            <input
+                type="text"
+                name="nuevo_talle[]"
+                style="width:80px"
+                required>
+        </td>
+
+        <td>
+            <input
+                type="number"
+                name="nuevo_stock[]"
+                value="0"
+                min="0"
+                style="width:70px">
+        </td>
+
+        <td align="center">0</td>
+
+        <td align="center">0</td>
+
+        <td align="center">
+            <button
+                type="button"
+                onclick="eliminarFila(this)">
+                🗑️
+            </button>
+        </td>
+        `;
+    }
+
+    function eliminarTalle(evento,id){
+
+        if(confirm("¿Eliminar este talle?")){
+
+            window.location =
+            "/evento/" + evento + "/eliminar_talle/" + id;
+
+        }
+
+    }
+
+    function eliminarFila(btn){
+
+        if(confirm("¿Eliminar este talle?")){
+            btn.closest("tr").remove();
+        }
+
+    }
+
+    </script>
+    """
+
+    return layout(salida,evento_id=evento_id)
+@organizador_bp.route("/evento/<int:evento_id>/guardar_stock", methods=["POST"])
+def guardar_stock(evento_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+    SELECT id,talle
+    FROM stock_remeras
+    WHERE evento_id=%s
+    """,(evento_id,))
+
+    talles = cursor.fetchall()
+
+    for t in talles:
+
+        stock = request.form.get(f"stock_{t['talle']}")
+        activo = 1 if request.form.get(f"activo_{t['id']}") else 0
+
+        cursor.execute("""
+        UPDATE stock_remeras
+        SET stock=%s,
+            activo=%s
+        WHERE id=%s
+        """, (
+            stock,
+            activo,
+            t["id"]
+        ))
+
+    nuevos_talles = request.form.getlist("nuevo_talle[]")
+    nuevos_stock = request.form.getlist("nuevo_stock[]")
+
+    for talle, stock in zip(nuevos_talles, nuevos_stock):
+
+        talle = talle.strip()
+
+        if talle == "":
+            continue
+
+        cursor.execute("""
+            INSERT INTO stock_remeras
+            (evento_id, talle, stock)
+            VALUES (%s,%s,%s)
+        """, (
+            evento_id,
+            talle,
+            stock
+        ))    
+
+    conn.commit()
+
+    cursor.close()
+    conn.close()
+
+    return redirect(f"/evento/{evento_id}/talles_form")
+@organizador_bp.route("/evento/<int:evento_id>/eliminar_talle/<int:id>")
+def eliminar_talle(evento_id, id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    # Buscar el talle
+    cursor.execute("""
+    SELECT talle
+    FROM stock_remeras
+    WHERE id=%s
+    """, (id,))
+
+    registro = cursor.fetchone()
+
+    if not registro:
+        cursor.close()
+        conn.close()
+        return redirect(f"/evento/{evento_id}/talles_form")
+
+    talle = registro["talle"]
+
+    # Verificar si tiene ventas pagadas
+    cursor.execute("""
+    SELECT COUNT(*) AS total
+    FROM inscripciones
+    WHERE evento_id=%s
+    AND talle_remera=%s
+    AND estado_pago IN ('pagado','bonificado')
+    """, (evento_id, talle))
+
+    total = cursor.fetchone()["total"]
+
+    if total == 0:
+
+        cursor.execute("""
+        DELETE FROM stock_remeras
+        WHERE id=%s
+        """, (id,))
+
+        conn.commit()
+
+        cursor.close()
+        conn.close()
+
+        return redirect(f"/evento/{evento_id}/talles_form")
+
+    cursor.close()
+    conn.close()
+
+    return redirect(f"/evento/{evento_id}/talles_form?error=vendido")
+@organizador_bp.route("/corredores")
+def ver_corredores():
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+        SELECT 
+            p.id,
+            p.nombre,
+            p.apellido,
+            p.dni,
+            p.email,
+            p.celular,
+            p.ciudad,
+            t.nombre AS team
+        FROM personas p
+        LEFT JOIN teams t ON p.team_id = t.id
+        ORDER BY p.apellido, p.nombre
+    """)
+
+    corredores = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+
+    salida = "<h1>Corredores registrados</h1>"
+
+    salida += """
+    <input type="text" id="buscar" placeholder="Buscar corredor..."
+    style="width:300px;padding:6px;margin-bottom:10px">
+    """
+
+    salida += """
+    <table border="1" cellpadding="6" style="border-collapse:collapse;width:100%" id="tabla_corredores">
+    <thead>
+    <tr style="background:#eee">
+        <th>ID</th>
+        <th>Nombre</th>
+        <th>Apellido</th>
+        <th>DNI</th>
+        <th>Email</th>
+        <th>Celular</th>
+        <th>Ciudad</th>
+        <th>Team</th>
+        <th>Editar</th>
+    </tr>
+    </thead>
+    <tbody>
+    """
+
+    for c in corredores:
+
+        salida += f"""
+        <tr>
+            <td>{c['id']}</td>
+            <td>{c['nombre']}</td>
+            <td>{c['apellido']}</td>
+            <td>{c['dni']}</td>
+            <td>{c['email']}</td>
+            <td>{c['celular']}</td>
+            <td>{c['ciudad']}</td>
+            <td>{c['team'] if c['team'] and c['team'] != 'None' else 'Sin equipo'}</td>
+            <td>
+            <a href="/corredor/{c['id']}">
+            <button>✏️</button>
+            </a>
+            </td>
+        </tr>
+        """
+
+    salida += "</tbody></table>"
+
+    salida += """
+    <script>
+
+    document.getElementById("buscar").addEventListener("keyup", function(){
+
+        let filtro = this.value.toLowerCase()
+        let filas = document.querySelectorAll("#tabla_corredores tbody tr")
+
+        filas.forEach(fila => {
+
+            let texto = fila.innerText.toLowerCase()
+
+            fila.style.display = texto.includes(filtro) ? "" : "none"
+
+        })
+
+    })
+
+    </script>
+    """
+
+    return layout(salida)
+
+@organizador_bp.route("/corredor/<int:persona_id>")
+def ver_corredor(persona_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    # datos del corredor
+    cursor.execute("""
+    SELECT *
+    FROM personas
+    WHERE id = %s
+    """,(persona_id,))
+
+    corredor = cursor.fetchone()
+
+    if not corredor:
+        cursor.close()
+        conn.close()
+        return layout("<h2>Corredor no encontrado</h2>")
+
+    # inscripciones del corredor
+    cursor.execute("""
+    SELECT 
+        i.id,
+        i.numero_inscripcion,
+        i.estado_pago,
+        d.nombre AS distancia,
+        e.nombre AS evento
+    FROM inscripciones i
+    JOIN distancias d ON i.distancia_id = d.id
+    JOIN eventos e ON i.evento_id = e.id
+    WHERE i.persona_id = %s
+    """,(persona_id,))
+
+    inscripciones = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+
+    salida = f"<h1>{corredor['nombre']} {corredor['apellido']}</h1>"
+
+    salida += "<h2>Inscripciones</h2>"
+
+    salida += "<table border=1 cellpadding=6>"
+    salida += """
+    <tr>
+        <th>Evento</th>
+        <th>Distancia</th>
+        <th>Estado</th>
+    </tr>
+    """
+
+    for i in inscripciones:
+
+        salida += f"""
+        <tr>
+            <td>{i['evento']}</td>
+            <td>{i['distancia']}</td>
+            <td>{i['estado_pago']}</td>
+        </tr>
+        """
+
+    salida += "</table>"
+
+    return layout(salida)
+
+@organizador_bp.route("/organizador")
+def panel_organizador():
+    from flask import request, session
+    if "organizador_id" not in session:
+        return redirect("/login")
+
+    organizador_id = session.get("organizador_id")
+    evento_id = request.args.get("evento_id")
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+        SELECT id, nombre, fecha, lugar, imagen
+        FROM eventos
+        WHERE activo = 1 AND organizador_id = %s
+        ORDER BY fecha
+    """, (organizador_id,))        
+
+    eventos = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+    
+    mensaje = ""
+
+    if request.args.get("ok") == "evento_creado":
+        mensaje = """
+        <div style="
+            background:#d4edda;
+            color:#155724;
+            padding:10px;
+            border-radius:5px;
+            margin-bottom:15px;
+        ">
+            ✅ Evento creado correctamente
+        </div>
+        """
+    
+  
+    salida = mensaje + f"""
+    <h1>Panel del organizador</h1>
+    """
+
+    salida += """
+    <a href="/organizador/nuevo_evento">
+    <button style='padding:10px 15px;margin-bottom:20px'>
+    ➕ Nuevo evento
+    </button>
+    </a>
+    """
+
+    salida += "<h2>Eventos activos</h2>"
+
+    salida += """
+    <div style='
+        display:flex;
+        flex-wrap:wrap;
+        gap:25px;
+        justify-content:flex-start;
+    '>
+    """
+
+    for e in eventos:
+
+        imagen = f"/evento_imagen/{e['imagen']}" if e["imagen"] else "/static/logo.png"
+
+        salida += f"""
+        <div style="
+            width:300px;
+            background:#f8f8f8;
+            border-radius:12px;
+            overflow:hidden;
+            box-shadow:0 4px 10px rgba(0,0,0,0.15);
+            display:flex;
+            flex-direction:column;
+        ">
+
+            <img src="{imagen}" style="
+                width:100%;
+                height:180px;
+                object-fit:cover;
+            ">
+
+            <div style="padding:15px; display:flex; flex-direction:column; flex-grow:1;">
+
+                <b style="font-size:18px; margin-bottom:8px;">
+                    {e['nombre']}
+                </b>
+
+                <div style="font-size:14px; color:#555;">
+                    📅 {e['fecha']}<br>
+                    📍 {e['lugar']}
+                </div>
+
+                <div style="margin-top:auto; text-align:center;">
+                    <a href="/evento/{e['id']}/panel">
+                        <button style="
+                            margin-top:15px;
+                            padding:10px;
+                            width:100%;
+                            background:#222;
+                            color:white;
+                            border:none;
+                            border-radius:6px;
+                            cursor:pointer;
+                        ">
+                            Entrar al panel
+                        </button>
+                    </a>
+                </div>
+
+            </div>
+
+        </div>
+        """
+
+    salida += "</div>"
+
+  
+
+    return layout(salida, evento_id=evento_id, eventos=eventos)
+
+@organizador_bp.route("/organizador/nuevo_evento", methods=["GET","POST"])
+def nuevo_evento():
+
+    from flask import session, redirect
+
+    # 🔐 PROTEGER RUTA
+    if "organizador_id" not in session:
+        return redirect("/login")
+    salida = ""
+
+    if request.method == "GET":
+
+        salida += """
+    <h1>Crear nuevo evento</h1>
+
+    <form method="POST" enctype="multipart/form-data">
+
+    Nombre del evento<br>
+    <input type="text" name="nombre" style="width:350px" required>
+
+    <br><br>
+
+    Fecha<br>
+    <input type="date" name="fecha" required>
+
+    <br><br>
+
+    Hora<br>
+    <input type="time" name="hora"
+    value="{{ evento.hora[:5] if evento.hora else '' }}">
+
+    <br><br>
+
+    Lugar<br>
+    <input type="text" name="lugar" style="width:350px" required>
+
+    <br><br>
+
+    Provincia<br>
+    <input type="text" name="provincia" style="width:350px">
+
+    <br><br>
+
+    Flyer del evento<br>
+    <input type="file" name="imagen" accept="image/*" onchange="previewImagen(event)">
+
+    <br><br>
+
+    <img id="preview" style="max-width:400px;display:none;border-radius:8px">
+    <small>Imagen promocional de la carrera</small>
+
+    <br><br>
+
+    <h3>📄 Documentos del evento</h3>
+
+    <label>
+    <input type="checkbox" name="reglamento_activo" value="1">
+    Activar Reglamento
+    </label>
+    <br>
+    <input type="file" name="reglamento_archivo" accept=".pdf,.txt">
+
+    <br><br>
+
+    <label>
+    <input type="checkbox" name="deslinde_activo" value="1">
+    Activar Deslinde
+    </label>
+    <br>
+    <input type="file" name="deslinde_archivo" accept=".pdf,.txt">
+
+    <br><br>
+
+    <button type="submit">Crear evento</button>
+
+    </form>
+
+    <script>
+    function previewImagen(event){
+
+        let reader = new FileReader()
+
+        reader.onload = function(){
+
+            let img = document.getElementById("preview")
+
+            img.src = reader.result
+            img.style.display = "block"
+
+        }
+
+        reader.readAsDataURL(event.target.files[0])
+    }
+    </script>
+    """
+        return layout(salida)
+
+    # --------- cuando se envía el formulario ---------
+
+    nombre = request.form["nombre"]
+    fecha = request.form["fecha"]
+    hora = request.form["hora"]
+    lugar = request.form["lugar"]
+    provincia = request.form["provincia"]
+
+    # -------- subir mapa --------
+
+    archivo = request.files.get("imagen")
+    imagen = None
+
+    # -------- documentos --------
+
+    reglamento_activo = 1 if request.form.get("reglamento_activo") else 0
+    deslinde_activo = 1 if request.form.get("deslinde_activo") else 0
+
+    reglamento_archivo = None
+    deslinde_archivo = None
+
+    carpeta_docs = "static/documentos"
+
+    if not os.path.exists(carpeta_docs):
+        os.makedirs(carpeta_docs)
+
+    doc1 = request.files.get("reglamento_archivo")
+    if doc1 and doc1.filename != "":
+        reglamento_archivo = secure_filename(doc1.filename)
+        doc1.save(os.path.join(carpeta_docs, reglamento_archivo))
+
+    doc2 = request.files.get("deslinde_archivo")
+    if doc2 and doc2.filename != "":
+        deslinde_archivo = secure_filename(doc2.filename)
+        doc2.save(os.path.join(carpeta_docs, deslinde_archivo))
+
+    if archivo and archivo.filename != "":
+        imagen = secure_filename(archivo.filename)
+
+        carpeta = "data/eventos"
+
+        if not os.path.exists(carpeta):
+            os.makedirs(carpeta)
+
+        ruta = os.path.join(carpeta, imagen)
+
+        img = Image.open(archivo)
+        img.thumbnail((1200,600))
+        img.save(ruta)
+
+    # -------- guardar evento --------
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    from flask import session
+    organizador_id = session["organizador_id"]
+
+    cursor.execute("""
+    INSERT INTO eventos
+    (
+    nombre,
+    fecha,
+    hora,
+    lugar,
+    provincia,
+    imagen,
+    organizador_id,
+    estado,
+    activo,
+    reglamento_activo,
+    reglamento_archivo,
+    deslinde_activo,
+    deslinde_archivo
+    )
+    VALUES
+    (%s,%s,%s,%s,%s,%s,%s,'cerrado',1,%s,%s,%s,%s)
+    """, (
+    nombre,
+    fecha,
+    hora,
+    lugar,
+    provincia,
+    imagen,
+    organizador_id,
+    reglamento_activo,
+    reglamento_archivo,
+    deslinde_activo,
+    deslinde_archivo
+    ))
+
+    conn.commit()
+
+    cursor.close()
+    conn.close()
+
+    return redirect("/organizador?ok=evento_creado")
+    
+@organizador_bp.route("/evento/<int:evento_id>/toggle_inscripciones")
+def toggle_inscripciones(evento_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    # ver estado actual
+    cursor.execute("SELECT estado FROM eventos WHERE id = %s", (evento_id,))
+    evento = cursor.fetchone()
+
+    if evento["estado"] == "abierto":
+        nuevo_estado = "cerrado"
+    else:
+        nuevo_estado = "abierto"
+
+    cursor.execute(
+        "UPDATE eventos SET estado = %s WHERE id = %s",
+        (nuevo_estado, evento_id)
+    )
+
+    conn.commit()
+
+    cursor.close()
+    conn.close()
+
+    return f"""
+    <script>
+    window.location.href="/evento/{evento_id}/panel"
+    </script>
+ 
+    """
+
+@organizador_bp.route("/evento/<int:evento_id>/distancias", methods=["GET","POST"])
+def administrar_distancias(evento_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    # ---------- crear distancia ----------
+    if request.method == "POST":
+
+        accion = request.form.get("accion")
+
+        # ELIMINAR
+        if accion == "eliminar":
+            distancia_id = request.form.get("distancia_id")
+
+            cursor.execute("""
+                UPDATE distancias
+                SET activo = 0
+                WHERE id = %s AND evento_id = %s
+            """, (distancia_id, evento_id))
+
+            conn.commit()
+            return redirect(request.url)
+
+        # CREAR
+        nombre = request.form.get("nombre")
+        cupo = request.form.get("cupo", 200)
+        precio = request.form.get("precio", 0)
+
+        fecha_inicio = request.form.get("fecha_inicio")
+        fecha_fin = request.form.get("fecha_fin")
+
+        incluye_remera = int(request.form.get("incluye_remera", 0))
+        es_gratis = int(request.form.get("es_gratis", 0))
+        validar_edad = 1 if request.form.get("validar_edad") else 0
+        edad_min = request.form.get("edad_min")
+        edad_max = request.form.get("edad_max")
+
+        if not validar_edad:
+            edad_min = None
+            edad_max = None
+
+        if not nombre:
+            return "Error: falta nombre"
+
+        # ✅ INSERT REAL
+        cursor.execute("""
+        INSERT INTO distancias
+        (evento_id, nombre, cupo, precio,
+        fecha_inicio_inscripcion,
+        fecha_fin_inscripcion,
+        incluye_remera,
+        es_gratis,
+        validar_edad,
+        edad_min,
+        edad_max)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """, (
+            evento_id,
+            nombre,
+            cupo,
+            precio,
+            fecha_inicio,
+            fecha_fin,
+            incluye_remera,
+            es_gratis,
+            validar_edad,
+            edad_min,
+            edad_max
+        ))
+        
+        conn.commit()
+
+        return redirect(request.url)
+    
+        
+    # ---------- listar distancias ----------
+    cursor.execute("""
+        SELECT id, nombre, cupo, precio
+        FROM distancias
+        WHERE evento_id = %s
+        AND activo = 1
+        ORDER BY id
+    """, (evento_id,))
+
+    distancias = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+    
+          
+    salida = "<h1>Distancias del evento</h1>"
+
+    salida += """
+    <form method="POST">
+
+    Nombre<br>
+    <input type="text" name="nombre" placeholder="10K competitiva" required><br><br>
+
+    Cupo<br>
+    <input type="number" name="cupo" value="200"><br><br>
+
+    Precio<br>
+    <input type="number" id="precio" name="precio" value="0"><br><br>
+
+    Inicio inscripción<br>
+    <input type="date" name="fecha_inicio"><br><br>
+
+    Fin inscripción<br>
+    <input type="date" name="fecha_fin"><br><br>
+
+    Incluye remera<br>
+    <select name="incluye_remera">
+        <option value="0">No</option>
+        <option value="1">Sí</option>
+    </select><br><br>
+
+    ¿Es gratis?<br>
+    <select name="es_gratis" id="gratis">
+        <option value="0">No</option>
+        <option value="1">Sí</option>
+    </select><br><br>
+    <br><br>
+
+    <label><b>Validar edad</b></label><br>
+    <input type="checkbox" name="validar_edad" value="1">
+
+    <br><br>
+
+    Edad mínima<br>
+    <input type="number" name="edad_min"><br><br>
+
+    Edad máxima<br>
+    <input type="number" name="edad_max"><br><br>
+    
+    <button type="submit">Agregar competencia</button>
+
+    </form>
+
+    <script>
+
+    function controlarPrecio(){
+
+        let gratis = document.getElementById("gratis")
+        let precio = document.getElementById("precio")
+
+        if(gratis.value == "1"){
+            precio.value = 0
+            precio.disabled = true
+        }else{
+            precio.disabled = false
+        }
+
+    }
+
+    document.getElementById("gratis").addEventListener("change", controlarPrecio)
+
+    window.onload = controlarPrecio
+
+    </script>
+    """
+
+    salida += "<h2>Competencias creadas</h2>"
+
+    salida += "<table border='1' cellpadding='6'>"
+    salida += """
+    <tr>
+        <th>Nombre</th>
+        <th>Cupo</th>
+        <th>Precio</th>
+        <th>Campos</th>
+        <th>Eliminar</th>
+    </tr>
+    """
+
+    for d in distancias:
+
+        salida += f"""
+            <tr>
+                <td>{d['nombre']}</td>
+                <td>{d['cupo']}</td>
+                <td>{d['precio']}</td>
+
+                <td>
+                    <a href="/distancia/{d['id']}/campos"
+                    style="
+                        background:#1976d2;
+                        color:white;
+                        padding:6px 10px;
+                        border-radius:6px;
+                        text-decoration:none;
+                        display:inline-block;
+                    ">
+                        ⚙️ Campos
+                    </a>
+                </td>
+                
+                <td>
+                    <form method="POST" style="display:inline;">
+                        <input type="hidden" name="accion" value="eliminar">
+                        <input type="hidden" name="distancia_id" value="{d['id']}">
+                        <button onclick="return confirm('¿Eliminar distancia?')">
+                            ❌
+                        </button>
+                    </form>
+                </td>
+            </tr>
+            """
+        
+
+    salida += "</table>"
+    return layout(salida, evento_id=evento_id)
+@organizador_bp.route("/distancia/<int:distancia_id>/campos_json")
+def campos_json(distancia_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+    SELECT *
+    FROM distancia_campos
+    WHERE distancia_id = %s
+    ORDER BY id
+    """, (distancia_id,))
+
+    campos = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+
+    return jsonify(campos)
+@organizador_bp.route("/evento/<int:evento_id>/talles", methods=["POST"])
+def guardar_talles(evento_id):
+
+    if "organizador_id" not in session:
+        return redirect("/login")
+    
+    talles = request.form.get("talles", "")
+    lista = [t.strip().upper() for t in talles.split(",") if t.strip()]
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("DELETE FROM talles_evento WHERE evento_id = %s", (evento_id,))
+
+    for t in lista:
+        cursor.execute("""
+        INSERT INTO talles_evento (evento_id, talle)
+        VALUES (%s, %s)
+        """, (evento_id, t))
+
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return redirect(f"/evento/{evento_id}/talles_form")
+    
+@organizador_bp.route("/distancia/<int:distancia_id>/campos", methods=["GET","POST"])
+def campos_distancia(distancia_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    # -------------------------
+    # CREAR CAMPO
+    # -------------------------
+    if request.method == "POST":
+
+        nombre = request.form.get("nombre")
+        tipo = request.form.get("tipo")
+        obligatorio = 1 if request.form.get("obligatorio") else 0
+        opciones = request.form.get("opciones")
+
+        cursor.execute("""
+        INSERT INTO distancia_campos
+        (distancia_id, nombre, tipo, obligatorio, opciones)
+        VALUES (%s,%s,%s,%s,%s)
+        """, (
+            distancia_id,
+            nombre,
+            tipo,
+            obligatorio,
+            opciones
+        ))
+
+        conn.commit()
+
+        return redirect(request.url)
+
+    # -------------------------
+    # DISTANCIA
+    # -------------------------
+    cursor.execute("""
+    SELECT *
+    FROM distancias
+    WHERE id = %s
+    """, (distancia_id,))
+
+    distancia = cursor.fetchone()
+
+    # -------------------------
+    # CAMPOS
+    # -------------------------
+    cursor.execute("""
+    SELECT *
+    FROM distancia_campos
+    WHERE distancia_id = %s
+    ORDER BY id DESC
+    """, (distancia_id,))
+
+    campos = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+
+    salida = f"""
+    <h1>
+    ⚙️ Campos extra
+    </h1>
+
+    <h3>{distancia['nombre']}</h3>
+
+    <form method="POST">
+
+    Nombre campo<br>
+    <input type="text" name="nombre" required><br><br>
+
+    Tipo<br>
+    <select name="tipo">
+
+        <option value="texto">
+            Texto
+        </option>
+
+        <option value="select">
+            Select
+        </option>
+
+    </select>
+
+    <br><br>
+
+    Opciones (solo select)<br>
+    <input 
+        type="text"
+        name="opciones"
+        placeholder="XS,S,M,L"
+    >
+
+    <br><br>
+
+    <label>
+        <input type="checkbox" name="obligatorio">
+        Obligatorio
+    </label>
+
+    <br><br>
+
+    <button>
+        Guardar campo
+    </button>
+
+    </form>
+
+    <hr>
+
+    <table border="1" cellpadding="6">
+
+    <tr>
+        <th>Nombre</th>
+        <th>Tipo</th>
+        <th>Obligatorio</th>
+    </tr>
+    """
+
+    for c in campos:
+
+        salida += f"""
+        <tr>
+            <td>{c['nombre']}</td>
+            <td>{c['tipo']}</td>
+            <td>{"✅" if c['obligatorio'] else "❌"}</td>
+        </tr>
+        """
+
+    salida += "</table>"
+
+    return layout(salida)
+@organizador_bp.route("/inscripcion/<numero>", methods=["GET","POST"])
+def editar_inscripcion(numero):
+    print(len(numero))
+    print("NUMERO:", numero)
+    print("DEBUG:", repr(numero))
+    salida = ""
+    tab = request.args.get("tab", "resumen")
+    
+    mensaje = ""
+    if request.args.get("ok"):
+        mensaje = """
+        <div style="
+            background:#d4edda;
+            color:#155724;
+            padding:10px;
+            border-radius:5px;
+            margin-bottom:15px;
+        ">
+            ✔ Cambios guardados correctamente
+        </div>
+        """
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    # -------------------------
+    # GUARDAR CAMBIOS
+    # -------------------------
+    if request.method == "POST":
+
+        accion = request.form.get("accion")
+
+        if accion == "marcar_pagado":
+            cursor.execute("""
+            UPDATE inscripciones
+            SET estado_pago = 'pagado'
+            WHERE numero_inscripcion = %s
+            """, (numero,))
+
+
+            conn.commit()
+
+            cursor.close()
+            conn.close()
+
+            return redirect(f"/inscripcion/{numero}?ok=1")
+
+        # -------------------------
+        # REGISTRAR PAGO MANUAL
+        # -------------------------
+             
+
+        nombre = request.form["nombre"]
+        apellido = request.form["apellido"]
+        dni = request.form["dni"]
+        email = request.form["email"]
+        celular = request.form.get("celular")
+        ciudad = request.form.get("ciudad")
+        fecha_nac = request.form.get("fecha_nac") or None
+        instagram = request.form.get("instagram")
+        facebook = request.form.get("facebook")
+        strava = request.form.get("strava")
+        genero = request.form.get("genero")
+        talle = request.form.get("talle_remera")
+        team_id = request.form.get("team_id")
+
+        if not team_id or team_id == "None":
+            team_id = None
+        else:
+            team_id = int(team_id)
+        team_nombre = request.form.get("team_input","").strip().upper()
+        
+        team_nombre = " ".join(team_nombre.split())
+        dorsal = request.form.get("dorsal") or None
+        distancia_id = request.form.get("distancia_id")
+
+        cursor.execute("""
+        SELECT id, evento_id, distancia_id, estado_pago
+        FROM inscripciones
+        WHERE numero_inscripcion = %s
+        """, (numero,))
+
+        ins = cursor.fetchone()
+
+        evento_id = ins["evento_id"]
+        inscripcion_id = ins["id"]
+        distancia_anterior = ins["distancia_id"]
+        estado_pago = ins["estado_pago"]
+
+        if not distancia_id:
+            distancia_id = ins["distancia_id"]
+        
+        team_id = request.form.get("team_id")
+        team_nombre = request.form.get("team_input","").strip().upper()
+
+        # normalizar
+        if team_id in ["", "None", None]:
+            team_id = None
+        else:
+            team_id = int(team_id)
+
+        team_nombre = " ".join(team_nombre.split())
+
+        # si no hay ID pero hay nombre → buscar o crear
+        if not team_id and team_nombre:
+
+            cursor.execute(
+                "SELECT id FROM teams WHERE nombre=%s",
+                (team_nombre,)
+            )
+            t = cursor.fetchone()
+
+            if t:
+                team_id = t["id"]
+            else:
+                cursor.execute(
+                    "INSERT INTO teams (nombre,organizador_id) VALUES (%s,%s)",
+                    (team_nombre,1)
+                )
+                conn.commit()
+                team_id = cursor.lastrowid
+
+        print("TEAM ID FINAL:", team_id)
+        print("NUMERO:", numero)
+        cursor.execute("""
+        UPDATE personas
+        SET nombre=%s,
+            apellido=%s,
+            dni=%s,
+            email=%s,
+            celular=%s,
+            ciudad=%s,
+            instagram=%s,
+            facebook=%s,
+            strava=%s,
+            fecha_nac=%s,
+            genero=%s,
+            team_id=%s
+        WHERE id = (
+            SELECT persona_id
+            FROM inscripciones
+            WHERE numero_inscripcion=%s
+        )
+        """,(
+            nombre,apellido,dni,email,celular,ciudad,
+            instagram,facebook,strava,fecha_nac,
+            genero,team_id,numero
+        ))
+        print("DISTANCIA RECIBIDA:", distancia_id)
+
+        # -------------------------
+        # VALIDAR DORSAL REPETIDO
+        # -------------------------
+        if dorsal:
+            cursor.execute("""
+                SELECT numero_inscripcion
+                FROM inscripciones
+                WHERE evento_id = %s
+                AND dorsal = %s
+                AND numero_inscripcion <> %s
+            """, (evento_id, dorsal, numero))
+
+            existe = cursor.fetchone()
+
+            print("EVENTO:", evento_id)
+            print("DORSAL:", dorsal)
+            print("NUMERO:", numero)
+            print("EXISTE:", existe)
+
+            if existe:
+                cursor.close()
+                conn.close()
+                return f"""
+                <script>
+                alert("El dorsal {dorsal} ya está asignado en este evento.");
+                history.back();
+                </script>
+                """
+
+        cursor.execute("""
+        UPDATE inscripciones
+        SET dorsal=%s,
+            distancia_id=%s,
+            talle_remera=%s
+        WHERE numero_inscripcion=%s
+        """, (dorsal, distancia_id, talle, numero))
+
+        # ---------------------------------
+        # SI CAMBIÓ DISTANCIA
+        # ---------------------------------
+
+        if str(distancia_anterior) != str(distancia_id):
+
+            # solo si está pendiente
+            if estado_pago == "pendiente":
+
+                # traer nuevo precio
+                cursor.execute("""
+                SELECT precio
+                FROM distancias
+                WHERE id = %s
+                """, (distancia_id,))
+
+                nueva_distancia = cursor.fetchone()
+
+                nuevo_precio = nueva_distancia["precio"]
+
+                # actualizar pago pendiente
+                cursor.execute("""
+                UPDATE pagos
+                SET monto = %s
+                WHERE inscripcion_id = %s
+                AND estado = 'pendiente'
+                """, (
+                    nuevo_precio,
+                    inscripcion_id
+                ))
+
+        # -------------------------
+        # RECARGAR CAMPOS EXTRA
+        # -------------------------
+
+        cursor.execute("""
+        SELECT *
+        FROM distancia_campos
+        WHERE distancia_id = %s
+        ORDER BY id
+        """, (distancia_id,))
+
+        campos_extra = cursor.fetchall()
+
+        # -------------------------
+        # GUARDAR CAMPOS EXTRA
+        # -------------------------
+
+        cursor.execute("""
+        DELETE FROM inscripcion_respuestas
+        WHERE inscripcion_id = %s
+        """, (inscripcion_id,))
+
+        for campo in campos_extra:
+
+            print("CAMPO:", campo["id"], campo["nombre"])
+
+            valor = request.form.get(f"campo_{campo['id']}", "")
+
+            print("VALOR:", valor)
+
+            cursor.execute("""
+            INSERT INTO inscripcion_respuestas
+            (inscripcion_id, campo_id, valor)
+            VALUES (%s,%s,%s)
+            """, (
+                inscripcion_id,
+                campo["id"],
+                valor
+            ))
+
+        conn.commit()
+
+        tab = request.args.get("tab") or request.form.get("tab") or "resumen"
+
+        return redirect(f"/inscripcion/{numero}?ok=1&tab={tab}")
+            
+    # -------------------------
+    # CARGAR DATOS INSCRIPCION
+    # -------------------------
+    cursor.execute("""
+    SELECT
+        i.id,
+        i.numero_inscripcion,
+        i.fecha_inscripcion,
+        i.estado_pago,
+        i.dorsal,
+        i.distancia_id,
+        i.talle_remera,
+        i.evento_id,           
+
+        p.nombre,
+        p.apellido,
+        p.dni,
+        p.email,
+        p.celular,
+        p.ciudad,
+        p.fecha_nac,
+        p.instagram,
+        p.facebook,
+        p.strava,
+        p.genero,
+        p.team_id,
+
+        t.nombre AS team,
+        d.nombre AS distancia
+
+    FROM inscripciones i
+    JOIN personas p ON p.id = i.persona_id
+    JOIN distancias d ON d.id = i.distancia_id
+    LEFT JOIN teams t ON p.team_id = t.id
+    WHERE i.numero_inscripcion=%s
+    """, (numero,))
+    ins = cursor.fetchone()
+    evento_id = ins["evento_id"]
+
+    
+    inscripcion_id = ins["id"]
+    print("ID INSCRIPCION:", inscripcion_id)
+
+    if ins and ins.get("fecha_nac"):
+        ins["fecha_nac"] = ins["fecha_nac"].strftime("%Y-%m-%d")
+    
+    cursor.execute("""
+    SELECT id, nombre
+    FROM distancias
+    WHERE evento_id = %s
+    AND activo = 1
+    ORDER BY nombre
+    """, (evento_id,))
+
+    distancias = cursor.fetchall()
+
+    # -------------------------
+    # CAMPOS EXTRA DISTANCIA
+    # -------------------------
+
+    cursor.execute("""
+    SELECT *
+    FROM distancia_campos
+    WHERE distancia_id = %s
+    ORDER BY id
+    """, (ins["distancia_id"],))
+
+    campos_extra = cursor.fetchall()
+
+    # respuestas guardadas
+    cursor.execute("""
+    SELECT campo_id, valor
+    FROM inscripcion_respuestas
+    WHERE inscripcion_id = %s
+    """, (inscripcion_id,))
+
+    respuestas_db = cursor.fetchall()
+
+    respuestas_extra = {}
+
+    for r in respuestas_db:
+        respuestas_extra[r["campo_id"]] = r["valor"]
+    
+    # =========================
+    # PAGOS DE LA INSCRIPCION
+    # =========================
+    cursor.execute("""
+    SELECT
+        id,
+        monto,
+        metodo,
+        estado,
+        referencia_externa,
+        fecha_creacion,
+        fecha_confirmacion
+    FROM pagos
+    WHERE inscripcion_id = %s
+    ORDER BY fecha_creacion DESC
+    """, (inscripcion_id,))
+
+    pagos = cursor.fetchall()
+
+    # -------------------------
+    # CARGAR TEAMS
+    # -------------------------
+
+    cursor.execute("SELECT id,nombre FROM teams ORDER BY nombre")
+    teams = cursor.fetchall()
+
+    if not ins:
+        cursor.close()
+        conn.close()
+        return layout("<h2>Inscripción no encontrada</h2>")
+
+    
+
+    # -------------------------
+    # CONSTRUIR LISTA TEAMS
+    # -------------------------
+    lista_teams = ""
+
+    for t in teams:
+        lista_teams += f'<option value="{t["nombre"]}" data-id="{t["id"]}">'
+
+    # -------------------------
+    # HTML
+    # -------------------------
+    
+    salida += f"""
+    <script>
+
+    function mostrar(seccion){{
+        let resumen = document.getElementById("resumen")
+        let corredor = document.getElementById("corredor")
+        let pago = document.getElementById("pago")
+
+        let secciones = {{
+            resumen: resumen,
+            corredor: corredor,
+            pago: pago
+        }}
+
+        for (let key in secciones){{
+            if(secciones[key]){{
+                secciones[key].style.display = "none"
+            }}
+        }}
+
+        if(secciones[seccion]){{
+            secciones[seccion].style.display = "block"
+        }}
+
+        let input = document.getElementById("tab_actual")
+        if(input){{
+            input.value = seccion
+        }}
+    }}
+
+    window.addEventListener("load", function(){{
+        mostrar("{tab}")
+    }})
+
+    </script>
+    """
+    
+    salida += mensaje
+
+    salida += f"""
+    <div style="margin-bottom:20px">
+
+    <button type="button" onclick="mostrar('resumen')">Resumen</button>
+
+    <button type="button" onclick="mostrar('corredor')">
+    Datos del corredor
+    </button>
+
+    <button type="button" onclick="mostrar('pago')">
+    Pagos
+    </button>
+
+    </div>
+    """
+    
+    salida += f"""
+    <form method="POST">
+
+    <input type="hidden" name="tab" id="tab_actual" value="{tab}">
+
+    <div id="resumen" style="display:none">
+
+    <a href="/evento/{evento_id}/inscriptos" style="
+    display:inline-block;
+    margin-bottom:15px;
+    padding:8px 15px;
+    background:#4caf50;
+    color:white;
+    border-radius:6px;
+    text-decoration:none;
+    ">
+    ← Volver a inscriptos
+    </a>
+    
+    <h2>Resumen</h2>
+
+    Código: {ins['numero_inscripcion']}<br><br>
+
+    Dorsal<br>
+    <input
+        type="number"
+        name="dorsal"
+        value="{ins['dorsal'] if ins['dorsal'] else ''}"
+        style="width:120px;padding:6px"
+    ><br><br>
+
+    Distancia<br>
+    <select name="distancia_id" style="width:220px;padding:6px;font-size:14px">
+    """
+
+    for d in distancias:
+
+        selected = ""
+
+        if d["id"] == ins["distancia_id"]:
+            selected = "selected"
+
+        salida += f"""
+        <option value="{d['id']}" {selected}>
+        {d['nombre']}
+        </option>
+        """
+
+    # 🔥 TODO ESTO JUNTO
+    salida += f"""
+    </select><br><br>
+
+    Fecha inscripción: {ins['fecha_inscripcion']}<br>
+    Estado pago: {ins['estado_pago']}<br>
+    Team: {ins.get('team','-')}<br>
+
+    </div>
+
+    <hr>
+    """
+
+    # ------------------- CORREDOR -------------------
+    salida += f"""
+    <div id="corredor" style="display:none">
+
+    <h2>Datos del corredor</h2>
+
+    Nombre<br>
+    <input type="text" name="nombre" value="{ins['nombre']}"><br><br>
+
+    Apellido<br>
+    <input type="text" name="apellido" value="{ins['apellido']}"><br><br>
+
+    DNI<br>
+    <input type="text" name="dni" value="{ins['dni']}"><br><br>
+
+    Email<br>
+    <input type="email" name="email" value="{ins['email']}"><br><br>
+
+    Celular<br>
+    <input type="text" name="celular" value="{ins.get('celular','')}"><br><br>
+
+    Ciudad<br>
+    <input type="text" name="ciudad" value="{ins.get('ciudad','')}"><br><br>
+
+    Fecha nacimiento<br>
+    <input type="date" name="fecha_nac" value="{ins.get('fecha_nac','')}"><br><br>
+
+        Fecha nacimiento<br>
+    <input type="date" name="fecha_nac" value="{ins.get('fecha_nac','')}"><br><br>
+
+    Género<br>
+    <select name="genero">
+        <option value="">Seleccione...</option>
+        <option value="M" {"selected" if ins.get("genero")=="M" else ""}>Masculino</option>
+        <option value="F" {"selected" if ins.get("genero")=="F" else ""}>Femenino</option>
+        <option value="X" {"selected" if ins.get("genero")=="X" else ""}>Otro</option>
+    </select><br><br>
+
+    Edad<br>
+    <input type="text" id="edad" readonly style="background:#eee"><br><br>
+
+    Edad<br>
+    <input type="text" id="edad" readonly style="background:#eee"><br><br>
+
+    Instagram<br>
+    <input type="text" name="instagram" value="{ins.get('instagram','')}"><br><br>
+
+    Facebook<br>
+    <input type="text" name="facebook" value="{ins.get('facebook','')}"><br><br>
+
+    Strava<br>
+    <input type="text" name="strava" value="{ins.get('strava','')}"><br><br>
+    """
+    # -------------------------
+    # CAMPOS EXTRA VISUALES
+    # -------------------------
+
+    salida += "<h3>Campos extra</h3>"
+
+    for campo in campos_extra:
+
+        valor = respuestas_extra.get(campo["id"], "")
+
+        salida += f"<label>{campo['nombre']}</label><br>"
+
+        # TEXTO
+        if campo["tipo"] == "texto":
+
+            salida += f"""
+            <input
+                type="text"
+                name="campo_{campo['id']}"
+                value="{valor}"
+                style="width:300px"
+            ><br><br>
+            """
+
+        # SELECT
+        elif campo["tipo"] == "select":
+
+            
+            salida += f"""
+
+            <select name="campo_{campo['id']}">
+            """
+
+            opciones = campo.get("opciones") or ""
+
+            for op in opciones.split(","):
+
+                op = op.strip()
+
+                selected = "selected" if op == valor else ""
+
+                salida += f"""
+                <option value="{op}" {selected}>
+                    {op}
+                </option>
+                """
+
+            salida += "</select><br><br>"
+    
+    print("EVENTO INS:", ins["evento_id"])
+    cursor.execute("""
+    SELECT talle FROM talles_evento
+    WHERE evento_id = %s
+    ORDER BY talle
+    """, (ins["evento_id"],))
+
+    talles = cursor.fetchall()
+    salida += "Talle remera<br>"
+    salida += '<select name="talle_remera">'
+    salida += '<option value="">Seleccionar</option>'
+
+    for t in talles:
+        selected = "selected" if ins.get("talle_remera") == t["talle"] else ""
+        salida += f"<option value='{t['talle']}' {selected}>{t['talle']}</option>"
+    
+    salida += '</select><br><br>'
+
+    # 👇 ACÁ ABRÍ DE NUEVO
+    salida += f"""
+    Team / Equipo<br>
+
+    <input type="text" name="team_input" id="team_input"
+    placeholder="Escribir equipo..."
+    value="{'' if not ins.get('team') or ins.get('team').strip().lower() in ['none',''] else ins.get('team')}">
+
+    <input type="hidden" name="team_id" id="team_id"
+    value="{ins.get('team_id') if ins.get('team_id') else ''}">
+
+    <div id="lista_teams" style="border:1px solid #ccc;max-height:120px;overflow:auto"></div>
+
+    </div>
+    """
+    
+
+    # ------------------- PAGOS -------------------
+    salida += f"""
+    <hr>
+
+    <div id="pago" style="display:none">
+
+    <h2>Pagos</h2>
+
+    <a href="/inscripcion/{numero}/marcar_pagado"
+    style="
+    display:inline-block;
+    padding:10px;
+    background:#4caf50;
+    color:white;
+    border-radius:5px;
+    text-decoration:none;
+    ">
+    💰 Marcar como pagado
+    </a>
+
+    <a href="/inscripcion/{numero}/pago"
+    style="
+    display:inline-block;
+    padding:8px 12px;
+    background:#1976d2;
+    color:white;
+    border-radius:6px;
+    text-decoration:none;
+    font-size:14px;
+    ">
+    Registrar pago manual
+    </a>
+
+    <br><br>
+
+    <table border="1" cellpadding="6" style="border-collapse:collapse;width:100%">
+
+    <tr style="background:#eee">
+    <th>ID</th>
+    <th>Monto</th>
+    <th>Método</th>
+    <th>Estado</th>
+    <th>Referencia</th>
+    <th>Creado</th>
+    <th>Confirmado</th>
+    <th>Editar</th>
+    </tr>
+    """
+
+    # 🔥 FILAS
+    if not pagos:
+        salida += "<tr><td colspan='8'>Sin pagos registrados</td></tr>"
+    else:
+        for p in pagos:
+
+            estado_clase = ""
+            estado_texto = p['estado']
+
+            if p['estado'] in ["aprobado", "pagado"]:
+                estado_texto = "Confirmado"
+                estado_clase = "background:#4caf50;color:white;padding:3px 6px;border-radius:4px"
+            elif p['estado'] == "pendiente":
+                estado_texto = "Pendiente"
+                estado_clase = "background:#ff9800;color:white;padding:3px 6px;border-radius:4px"
+            elif p['estado'] == "bonificado":
+                estado_texto = "🎁 Bonificado"
+                estado_clase = "background:#2196F3;color:white;padding:3px 6px;border-radius:4px"    
+
+            f_creacion = p['fecha_creacion'].strftime("%d/%m/%Y %H:%M") if p['fecha_creacion'] else "-"
+            f_confirma = p['fecha_confirmacion'].strftime("%d/%m/%Y %H:%M") if p['fecha_confirmacion'] else "-"
+
+            if p["metodo"] == "mercadopago":
+                boton = "<span style='color:#888'>🔒</span>"
+            else:
+                boton = f"""
+                <a href="/pago/{p['id']}/editar">
+                    <button type="button">Editar</button>
+                </a>
+                """
+            
+            salida += f"""
+            <tr>
+                <td>{p['id']}</td>
+                <td>${p['monto']}</td>
+                <td>{p['metodo'] or 'Manual'}</td>
+                <td><span style="{estado_clase}">{estado_texto}</span></td>
+                <td>{p['referencia_externa'] or '-'}</td>
+                <td>{f_creacion}</td>
+                <td>{f_confirma}</td>
+                <td>{boton}</td>
+            </tr>
+            """    
+
+    salida += """
+    </table>
+    </div>
+
+    <br><br>
+
+    <button type="submit">
+    Guardar cambios
+    </button>
+
+    </form>
+    """
+
+    salida += """
+    <script>
+
+    function calcularEdad(){
+        let fechaInput = document.querySelector("input[name='fecha_nac']")
+        let edadInput = document.getElementById("edad")
+
+        if(!fechaInput || !edadInput) return
+
+        let fecha = fechaInput.value
+        if(!fecha){
+            edadInput.value = ""
+            return
+        }
+
+        let hoy = new Date()
+        let fn = new Date(fecha)
+
+        let edad = hoy.getFullYear() - fn.getFullYear()
+
+        let m = hoy.getMonth() - fn.getMonth()
+
+        if(m < 0 || (m === 0 && hoy.getDate() < fn.getDate())){
+            edad--
+        }
+
+        edadInput.value = edad
+    }
+
+    // CLAVE: esperar un poquito
+    setTimeout(calcularEdad, 200)
+
+    // también al cambiar
+    document.addEventListener("input", function(e){
+        if(e.target.name === "fecha_nac"){
+            calcularEdad()
+        }
+    })
+
+    </script>
+    """
+    
+    print("TAB ARGS:", request.args.get("tab"))
+    print("TAB FINAL:", tab)
+    
+    salida += "<script>const teams = ["
+
+    for t in teams:
+        salida += f'{{ id: {t["id"]}, nombre: "{t["nombre"]}" }},'
+
+    salida += "];</script>"
+
+    
+
+    salida += """
+    <script>
+
+    const input = document.getElementById("team_input");
+    const hidden = document.getElementById("team_id");
+    const lista = document.getElementById("lista_teams");
+
+    if(input){
+        input.addEventListener("keyup", function(){
+            let texto = input.value.toLowerCase().trim();
+            lista.innerHTML = "";
+            hidden.value = "";
+
+            if(texto.length === 0) return;
+
+            let filtrados = teams.filter(t => 
+                t.nombre.toLowerCase().includes(texto)
+            );
+
+            filtrados.forEach(t => {
+                let div = document.createElement("div");
+                div.innerText = t.nombre;
+
+                div.onclick = function(){
+                    input.value = t.nombre;
+                    hidden.value = t.id;
+                    lista.innerHTML = "";
+                };
+
+                lista.appendChild(div);
+            });
+
+            if(filtrados.length === 0){
+                let nuevo = document.createElement("div");
+                nuevo.innerText = "+ Crear equipo: " + input.value;
+
+                nuevo.onclick = function(){
+                    hidden.value = "";
+                    lista.innerHTML = "";
+                };
+
+                lista.appendChild(nuevo);
+            }
+        });
+    }
+
+    </script>
+    """
+
+    return layout(salida)
+
+    
+@organizador_bp.route("/test_pago")
+def test_pago():
+    print("🔥 ENTRE A TEST")
+    return "FUNCIONA TEST"   
+
+@organizador_bp.route("/inscripcion/<numero>/pago", methods=["GET","POST"])
+def pantalla_pago(numero):
+    print("METHOD:", request.method)
+    print("ENTRE A PANTALLA PAGO")
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+    SELECT i.id, d.precio, d.nombre
+    FROM inscripciones i
+    JOIN distancias d ON d.id = i.distancia_id
+    WHERE i.numero_inscripcion = %s
+    """, (numero,))
+
+    info = cursor.fetchone()
+    print("INFO:", info)
+
+    if not info:
+        return layout("<h2>Inscripción no encontrada</h2>")
+    
+    inscripcion_id = info["id"]
+
+    
+    if request.method == "POST":
+
+        monto = request.form["monto"]
+        estado = request.form["estado"]
+        metodo = request.form["metodo"]
+        
+        cursor.execute("""
+        SELECT id FROM pagos
+        WHERE inscripcion_id = (
+            SELECT id FROM inscripciones WHERE numero_inscripcion=%s
+        )
+        AND estado IN ('pagado','aprobado')
+        """, (numero,))
+
+        existe_pago = cursor.fetchone()
+
+        if existe_pago:
+            return "<h2>⚠️ Esta inscripción ya tiene un pago Confirmado</h2>"
+        if estado == "aprobado":
+            estado = "pagado"
+        cursor.execute("""
+        INSERT INTO pagos (inscripcion_id, monto, metodo, estado, fecha_creacion)
+        VALUES (%s,%s,%s,%s,NOW())
+        """, (inscripcion_id, monto, metodo, estado))
+
+        conn.commit()
+
+        cursor.execute("""
+        UPDATE inscripciones
+        SET estado_pago=%s
+        WHERE id=%s
+        """, (estado, inscripcion_id))
+        conn.commit()
+
+        from flask import redirect
+        return redirect(f"/inscripcion/{numero}?ok=1&tab=pago")
+    
+    print("HTML NUEVOOOOO")
+    return layout(f"""
+    <h2>Registrar pago</h2>
+
+    Distancia: {info['nombre']}<br><br>
+
+    <form method="POST">
+
+    Monto<br>
+    <input type="number" name="monto" value="{float(info['precio'])}"><br><br>
+
+    Estado<br>
+
+    <select name="estado">
+    
+        <option value="pendiente">PENDIENTE </option>
+        <option value="pagado">PAGADO </option>
+        <option value="bonificado">BONIFICADO </option>
+
+    </select><br><br>
+
+    Metodo<br>
+    <select name="metodo">
+        <option value="manual">Manual</option>
+        <option value="efectivo">Efectivo</option>
+        <option value="transferencia">Transferencia</option>
+    </select><br><br>
+
+    <button type="submit">Guardar</button>
+
+    </form>
+    """)
+    
+# =========================
+# EDITAR PAGO
+# =========================
+@organizador_bp.route("/pago/<int:pago_id>/editar", methods=["GET","POST"])
+def editar_pago(pago_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    # traer pago
+    cursor.execute("""
+    SELECT p.*, i.numero_inscripcion
+    FROM pagos p
+    JOIN inscripciones i ON i.id = p.inscripcion_id
+    WHERE p.id = %s
+    """, (pago_id,))
+
+    pago = cursor.fetchone()
+
+    if not pago:
+        return layout("<h2>Pago no encontrado</h2>")
+
+    if request.method == "POST":
+
+        monto = request.form["monto"]
+        estado = request.form["estado"]
+        metodo = request.form["metodo"]
+
+        if estado == "aprobado":
+            estado = "pagado"
+
+        cursor.execute("""
+        UPDATE pagos
+        SET monto=%s, metodo=%s, estado=%s
+        WHERE id=%s
+        """, (monto, metodo, estado, pago_id))
+
+        cursor.execute("""
+        UPDATE inscripciones
+        SET estado_pago=%s
+        WHERE id=%s
+        """, (estado, pago["inscripcion_id"]))
+
+        conn.commit()
+
+        return redirect(f"/inscripcion/{pago['numero_inscripcion']}?ok=1&tab=pago")
+
+    return layout(f"""
+    <h2>Editar pago #{pago['id']}</h2>
+
+    <form method="POST">
+
+    Monto<br>
+    <input type="number" name="monto" value="{pago['monto']}"><br><br>
+
+    Estado<br>
+    <select name="estado">
+        <option value="pendiente" {"selected" if pago['estado']=="pendiente" else ""}>Pendiente</option>
+        <option value="pagado" {"selected" if pago['estado'] in ['pagado','aprobado'] else ""}>Pagado</option>
+        <option value="bonificado"
+        {"selected" if pago['estado']=="bonificado" else ""}>
+        Bonificado
+        </option>
+    </select><br><br>
+
+    Método<br>
+    <select name="metodo">
+        <option value="manual" {"selected" if pago['metodo']=="manual" else ""}>Manual</option>
+        <option value="efectivo" {"selected" if pago['metodo']=="efectivo" else ""}>Efectivo</option>
+        <option value="transferencia" {"selected" if pago['metodo']=="transferencia" else ""}>Transferencia</option>
+    </select><br><br>
+
+    <button type="submit">Guardar cambios</button>
+
+    </form>
+    """)
+# -------------------------
+# EDITAR EVENTO
+# -------------------------
+
+@organizador_bp.route("/evento/<int:evento_id>/editar", methods=["GET","POST"])
+def editar_evento(evento_id):
+    
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    # =========================
+    # POST (GUARDAR)
+    # =========================
+    if request.method == "POST":
+
+        # 🔹 traer evento actual para conservar archivos existentes
+        cursor.execute("SELECT * FROM eventos WHERE id=%s", (evento_id,))
+        evento = cursor.fetchone()
+
+        nombre = request.form["nombre"]
+        fecha = request.form["fecha"]
+        hora_form = request.form.get("hora")
+        hora = hora_form if hora_form else evento.get("hora")
+        lugar = request.form["lugar"]
+        provincia = request.form["provincia"]
+        descripcion = request.form.get("descripcion", "")
+
+        archivo_reglamento = request.files.get("reglamento_pdf")
+        archivo_deslinde = request.files.get("deslinde_pdf")
+
+        direccion = request.form.get("direccion")
+        latitud = request.form.get("latitud")
+        longitud = request.form.get("longitud")
+
+        latitud = float(latitud) if latitud not in [None, "", "None"] else None
+        longitud = float(longitud) if longitud not in [None, "", "None"] else None
+
+        archivo = request.files.get("imagen")
+        imagen = evento.get("imagen")
+
+        # conservar valores actuales
+        reglamento = evento.get("reglamento_archivo")
+        deslinde = evento.get("deslinde_archivo")
+
+        reglamento_activo = evento.get("reglamento_activo", 0)
+        deslinde_activo = evento.get("deslinde_activo", 0)
+
+        # -------------------------
+        # DOCUMENTOS
+        # -------------------------
+        carpeta_docs = "static/documentos"
+        if not os.path.exists(carpeta_docs):
+            os.makedirs(carpeta_docs)
+
+        if archivo_reglamento and archivo_reglamento.filename != "":
+            nombre_reglamento = secure_filename(archivo_reglamento.filename)
+            ruta = os.path.join(carpeta_docs, nombre_reglamento)
+            archivo_reglamento.save(ruta)
+
+            reglamento = nombre_reglamento
+            reglamento_activo = 1
+
+        if archivo_deslinde and archivo_deslinde.filename != "":
+            nombre_deslinde = secure_filename(archivo_deslinde.filename)
+            ruta = os.path.join(carpeta_docs, nombre_deslinde)
+            archivo_deslinde.save(ruta)
+
+            deslinde = nombre_deslinde
+            deslinde_activo = 1
+
+        # -------------------------
+        # IMAGEN
+        # -------------------------
+        if archivo and archivo.filename and archivo.filename.strip() != "":
+            nombre_archivo = secure_filename(archivo.filename)
+
+            carpeta = "data/eventos"
+            os.makedirs(carpeta, exist_ok=True)
+
+            ruta = os.path.join(carpeta, nombre_archivo)
+            archivo.save(ruta)
+
+            imagen = nombre_archivo
+        # -------------------------
+        # UPDATE
+        # -------------------------
+        cursor.execute("""
+        UPDATE eventos
+        SET nombre=%s,
+            fecha=%s,
+            hora=%s,
+            lugar=%s,
+            provincia=%s,
+            descripcion=%s,
+            direccion=%s,
+            latitud=%s,
+            longitud=%s,
+            imagen=%s,
+            reglamento_archivo=%s,
+            reglamento_activo=%s,
+            deslinde_archivo=%s,
+            deslinde_activo=%s
+        WHERE id=%s
+        """, (
+            nombre,
+            fecha,
+            hora,
+            lugar,
+            provincia,
+            descripcion,
+            direccion,
+            latitud,
+            longitud,
+            imagen,
+            reglamento,
+            reglamento_activo,
+            deslinde,
+            deslinde_activo,
+            evento_id
+        ))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return f"""
+        <script>
+        alert("Evento actualizado");
+        window.location.href="/evento/{evento_id}/panel";
+        </script>
+        """
+
+    # =========================
+    # GET
+    # =========================
+    cursor.execute("SELECT * FROM eventos WHERE id=%s",(evento_id,))
+    evento = cursor.fetchone()
+
+    hora = evento.get("hora")
+
+    if hora:
+        try:
+            hora = hora.strftime("%H:%M")
+        except:
+            hora = str(hora)[:5]
+    else:
+        hora = ""
+
+    cursor.close()
+    conn.close()
+
+    salida = f"""
+    <form method="POST" enctype="multipart/form-data">
+
+    <h2>Editar evento</h2>
+
+    Nombre del evento<br>
+    <input type="text" name="nombre" value="{evento.get('nombre','')}" style="width:400px"><br><br>
+
+    Fecha<br>
+    <input type="date" name="fecha" value="{evento.get('fecha','')}"><br><br>
+
+    Hora<br>
+    <input type="time" name="hora" value="{str(hora)[:5] if hora else ''}"><br><br>
+
+    Lugar<br>
+    <input type="text" name="lugar" value="{evento.get('lugar','')}" style="width:400px"><br><br>
+
+    Provincia<br>
+    <input type="text" name="provincia" value="{evento.get('provincia','')}" style="width:400px"><br><br>
+
+    <h3>Descripción</h3>
+    <button type="button" onclick="document.getElementById('subirImgEditor').click()" style="
+    padding:10px 16px;
+    background:#1565c0;
+    color:white;
+    border:none;
+    border-radius:6px;
+    cursor:pointer;
+    margin-bottom:10px;
+    ">
+    📷 Insertar imagen
+    </button>
+
+<input type="file" id="subirImgEditor" accept="image/*" style="display:none">
+    <textarea id="editor" name="descripcion" style="width:100%;height:200px;">
+    {evento.get("descripcion","")}
+    </textarea><br><br>
+
+    <h3>Ubicación del evento</h3>
+
+    <input type="text"
+        id="direccion"
+        name="direccion"
+        value="{evento.get('direccion','')}"
+        style="width:330px">
+
+    <button
+        type="button"
+        onclick="buscarDireccion()">
+        🔍 
+    </button>
+
+    <br><br>
+
+    <input type="hidden" id="latitud" name="latitud"
+    value="{evento.get('latitud','')}">
+
+    <input type="hidden" id="longitud" name="longitud"
+    value="{evento.get('longitud','')}">
+
+    <div style="max-width:400px;margin-top:10px">
+        <div id="map" style="width:100%;height:180px;border-radius:10px"></div>
+    </div>
+
+    <br><br>
+
+    <h3>Imagen</h3>
+
+    <input type="file" name="imagen" accept="image/*" onchange="previewImagen(event)"><br><br>
+
+    <img id="preview" style="max-width:200px;border-radius:8px;display:none">
+
+    <img src="/evento_imagen/{evento.get('imagen') or 'logo.png'}"
+    style="max-width:200px;border-radius:8px;"><br><br>
+
+    <h3>Reglamento (PDF)</h3>
+    <input type="file" name="reglamento_pdf" accept=".pdf"><br>
+    Archivo actual: {evento.get('reglamento','Sin archivo')}<br><br>
+
+    <h3>Deslinde (PDF)</h3>
+    <input type="file" name="deslinde_pdf" accept=".pdf"><br>
+    Archivo actual: {evento.get('deslinde','Sin archivo')}<br><br>
+
+    <button type="submit" style="
+    padding:10px 20px;
+    background:#222;
+    color:white;
+    border:none;
+    border-radius:6px;
+    cursor:pointer;
+    ">
+    Guardar cambios
+    </button>
+    
+    <script>
+    document.querySelector("form").addEventListener("submit", function() {{
+        for (var instance in CKEDITOR.instances) {{
+            CKEDITOR.instances[instance].updateElement();
+        }}
+    }});
+    </script>
+
+    </form>
+    """
+    salida += """
+    <script>
+    function previewImagen(event){
+        const input = event.target;
+        const preview = document.getElementById("preview");
+
+        if(input.files && input.files[0]){
+            const reader = new FileReader();
+
+            reader.onload = function(e){
+                preview.src = e.target.result;
+                preview.style.display = "block";
+            }
+
+            reader.readAsDataURL(input.files[0]);
+        }
+    }
+    document.getElementById("subirImgEditor").addEventListener("change", async function () {
+
+        const archivo = this.files[0];
+        if (!archivo) return;
+
+        const datos = new FormData();
+        datos.append("upload", archivo);
+
+        const resp = await fetch("/subir_imagen_simple", {
+            method: "POST",
+            body: datos
+        });
+
+        const json = await resp.json();
+
+        if (json.url) {
+            CKEDITOR.instances.editor.insertHtml(
+                '<p><img src="' + json.url + '" style="max-width:100%;"></p>'
+            );
+        } else {
+            alert("Error al subir imagen");
+        }
+
+        this.value = "";
+    });
+    </script>
+    """
+    # =========================
+    # CKEDITOR
+    # =========================
+    salida += """
+        <script src="https://cdn.ckeditor.com/4.22.1/full/ckeditor.js"></script>
+
+        <script>
+        CKEDITOR.replace('editor', {
+        height: 350,
+        uploadUrl: '/subir_imagen',
+        filebrowserUploadUrl: '/subir_imagen',
+        filebrowserUploadMethod: 'form',
+
+        toolbar: [
+            { name: 'styles', items: ['Format','Font','FontSize'] },
+            { name: 'basicstyles', items: ['Bold','Italic','Underline','Strike'] },
+            { name: 'colors', items: ['TextColor','BGColor'] },
+            { name: 'paragraph', items: ['NumberedList','BulletedList','Outdent','Indent','Blockquote'] },
+            { name: 'links', items: ['Link','Unlink'] },
+            { name: 'insert', items: ['UploadImage','Image','Table','HorizontalRule'] },
+            { name: 'clipboard', items: ['Undo','Redo'] },
+            { name: 'tools', items: ['Maximize','Source'] }
+        ],
+
+        removeButtons: '',
+        allowedContent: true
+    });
+    </script>
+    """
+
+    salida += """
+    <link rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    
+    """
+        
+
+    # =========================
+    # MAPA
+    # =========================
+
+    salida += """
+    <link rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    """
+
+    salida += f"""
+    <script>
+
+    let map;
+    let marker;
+
+    window.addEventListener("load", function() {{
+
+        let lat = {evento.get("latitud") or -34.8};
+        let lng = {evento.get("longitud") or -58.3};
+
+        map = L.map("map").setView([lat, lng], 15);
+
+        L.tileLayer(
+            "https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png",
+            {{
+                maxZoom: 19,
+                attribution: "© OpenStreetMap"
+            }}
+        ).addTo(map);
+
+        marker = L.marker([lat, lng], {{
+            draggable: true
+        }}).addTo(map);
+
+        // Arrastrar marcador
+        marker.on("dragend", function() {{
+
+            let p = marker.getLatLng();
+
+            document.getElementById("latitud").value = p.lat;
+            document.getElementById("longitud").value = p.lng;
+
+        }});
+
+        // Click sobre el mapa
+        map.on("click", function(e) {{
+
+            marker.setLatLng(e.latlng);
+
+            document.getElementById("latitud").value = e.latlng.lat;
+            document.getElementById("longitud").value = e.latlng.lng;
+
+        }});
+
+    }});
+
+
+    // =========================
+    // Buscar dirección
+    // =========================
+
+    async function buscarDireccion() {{
+
+        let direccion = document.getElementById("direccion").value.trim();
+
+        if (!direccion) return;
+
+        let resp = await fetch(
+            "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" +
+            encodeURIComponent(direccion)
+        );
+
+        let datos = await resp.json();
+
+        if (datos.length == 0) {{
+            alert("Dirección no encontrada.");
+            return;
+        }}
+
+        let lat = parseFloat(datos[0].lat);
+        let lng = parseFloat(datos[0].lon);
+
+        map.setView([lat, lng], 16);
+
+        marker.setLatLng([lat, lng]);
+
+        document.getElementById("latitud").value = lat;
+        document.getElementById("longitud").value = lng;
+
+    }}
+    document
+    .getElementById("direccion")
+    .addEventListener("keydown", function(e){{
+
+        if(e.key=="Enter"){{
+
+            e.preventDefault();
+
+            buscarDireccion();
+
+        }}
+
+    }});
+    </script>
+    """
+
+    return layout(salida)
+
+# ---------------------------------------------------
+# SUBIR IMÁGENES DESDE EL EDITOR
+# ---------------------------------------------------
+
+@organizador_bp.route("/subir_imagen", methods=["POST"])
+def subir_imagen():
+
+    archivo = request.files.get("upload")
+
+    if not archivo:
+        return jsonify({
+            "uploaded": False,
+            "error": {
+                "message": "No se pudo subir el archivo"
+            }
+        })
+
+    import time
+
+    import time
+    import uuid
+
+    extension = archivo.filename.rsplit(".", 1)[-1].lower()
+    nombre = f"{int(time.time())}_{uuid.uuid4().hex[:6]}.{extension}"
+
+    carpeta = os.path.join("static", "mapas")
+
+    if not os.path.exists(carpeta):
+        os.makedirs(carpeta)
+
+    ruta = os.path.join(carpeta, nombre)
+
+    img = Image.open(archivo)
+    img.thumbnail((1200,800))
+    img.save(ruta)
+
+    url = f"/static/mapas/{nombre}"
+
+    return jsonify({
+        "url": url
+    })
+
+    # ESTE JSON ES EL QUE CKEDITOR ESPERA
+    func_num = request.args.get("CKEditorFuncNum")
+
+    return f"""
+    <script>
+    window.parent.CKEDITOR.tools.callFunction(
+        {func_num},
+        "{url}",
+        "Imagen subida correctamente"
+    );
+    </script>
+    """
+@organizador_bp.route("/evento/<int:evento_id>/publicar")
+def publicar_evento(evento_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("UPDATE eventos SET publicado = 1 WHERE id = %s", (evento_id,))
+    conn.commit()
+
+    cursor.close()
+    conn.close()
+
+    return redirect(f"/evento/{evento_id}/panel")
+
+@organizador_bp.route("/evento/<int:evento_id>/ocultar")
+def ocultar_evento(evento_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("UPDATE eventos SET publicado = 0 WHERE id = %s", (evento_id,))
+    conn.commit()
+
+    cursor.close()
+    conn.close()
+
+    return redirect(f"/evento/{evento_id}/panel")
+
+@organizador_bp.route("/evento/<int:evento_id>/exportar")
+def pantalla_exportar(evento_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+        SELECT id, nombre
+        FROM distancias
+        WHERE evento_id = %s
+    """, (evento_id,))
+
+    distancias = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+
+    salida = f"""
+    <h2>Exportar participantes</h2>
+
+    <form method="GET" action="/evento/{evento_id}/exportar_excel">
+
+    Estado:<br>
+    <select name="estado">
+        <option value="">Todos</option>
+        <option value="pagado">Pagados</option>
+        <option value="bonificado">Bonificados</option>
+        <option value="pendiente">Pendientes</option>
+    </select><br><br>
+
+    Distancia:<br>
+    <select name="distancia">
+        <option value="">Todas</option>
+    """
+
+    for d in distancias:
+        salida += f"<option value='{d['id']}'>{d['nombre']}</option>"
+
+    salida += """
+    </select><br><br>
+
+    <button type="submit">
+        Generar Excel
+    </button>
+
+    </form>
+    """
+
+    return layout(salida)
+@organizador_bp.route("/subir_imagen_simple", methods=["POST"])
+def subir_imagen_simple():
+
+    archivo = request.files.get("upload")
+
+    if not archivo:
+        return jsonify({"error": "sin archivo"})
+
+    import time, uuid
+
+    extension = archivo.filename.rsplit(".", 1)[-1].lower()
+    nombre = f"{int(time.time())}_{uuid.uuid4().hex[:6]}.{extension}"
+
+    carpeta = os.path.join("static", "mapas")
+    os.makedirs(carpeta, exist_ok=True)
+
+    ruta = os.path.join(carpeta, nombre)
+
+    img = Image.open(archivo)
+    img.thumbnail((1200,800))
+    img.save(ruta)
+
+    url = f"/static/mapas/{nombre}"
+
+    return jsonify({
+        "url": url
+    })
+@organizador_bp.route("/evento/<int:evento_id>/cupones")
+def pantalla_cupones(evento_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+        SELECT *
+        FROM cupones
+        WHERE evento_id=%s
+        ORDER BY clave
+    """, (evento_id,))
+
+    cupones = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+
+    salida = f"""
+
+    <a href="/evento/{evento_id}/panel">
+        <button style="margin-bottom:15px;">
+            ⬅ Volver al panel
+        </button>
+    </a>
+
+    <h2>🎟️ Cupones de descuento</h2>
+
+    <a href="/evento/{evento_id}/nuevo_cupon">
+        <button>➕ Nuevo cupón</button>
+    </a>
+
+    <br><br>
+
+    <table border="1" cellpadding="8" style="border-collapse:collapse;width:100%">
+
+    <tr style="background:#efefef">
+        <th>Código</th>
+        <th>Desc.</th>
+        <th>Desde</th>
+        <th>Hasta</th>
+        <th>Usos</th>
+        <th>Activo</th>
+        <th>Acciones</th>
+    </tr>
+    """
+
+    for c in cupones:
+
+        if c["max_usos"]:
+            usos = f"{c['usos']} / {c['max_usos']}"
+        else:
+            usos = f"{c['usos']} / ∞"
+
+        salida += f"""
+        <tr>
+
+        <td>{c['clave']}</td>
+
+        <td>{c['descuento']}%</td>
+
+        <td>{c['fecha_desde']}</td>
+
+        <td>{c['fecha_hasta']}</td>
+
+        <td>{usos}</td>
+
+
+        <td>{"🟢 Activo" if c["activo"] else "🔴 Inactivo"}</td>
+
+        
+        <td>
+
+        <a href="/evento/{evento_id}/editar_cupon/{c['id']}">
+        ✏️
+        </a>
+
+        &nbsp;
+
+        <a href="/evento/{evento_id}/eliminar_cupon/{c['id']}"
+        onclick="return confirm('¿Eliminar este cupón?')">
+
+        🗑️
+
+        </a>
+
+        </td>
+
+        </tr>
+        """
+
+    salida += "</table>"
+
+    return layout(salida, evento_id=evento_id)
+@organizador_bp.route("/evento/<int:evento_id>/nuevo_cupon")
+def nuevo_cupon(evento_id):
+
+    hoy = datetime.now().strftime("%Y-%m-%d")
+
+    salida = f"""
+    <h2>➕ Nuevo cupón</h2>
+
+    <form method="POST" action="/evento/{evento_id}/guardar_cupon">
+
+    Código<br>
+    <input type="text" name="clave" required
+           style="width:250px"><br><br>
+
+    Descuento (%)<br>
+    <input type="number" name="descuento"
+           min="1" max="100"
+           required><br><br>
+
+    Fecha desde<br>
+    <input type="date"
+           name="fecha_desde"
+           value="{hoy}"
+           required><br><br>
+
+    Fecha hasta<br>
+    <input type="date"
+           name="fecha_hasta"
+           value="{hoy}"
+           required><br><br>
+
+    Máximo de usos<br>
+    <input type="number"
+           name="max_usos"
+           placeholder="Vacío = ilimitado"><br><br>
+
+    <label>
+        <input type="checkbox"
+               name="activo"
+               checked>
+        Activo
+    </label>
+
+    <br><br>
+
+    <button type="submit">
+        💾 Guardar cupón
+    </button>
+
+    </form>
+    """
+
+    return layout(salida, evento_id=evento_id)
+@organizador_bp.route("/evento/<int:evento_id>/guardar_cupon", methods=["POST"])
+def guardar_cupon(evento_id):
+
+    clave = request.form["clave"].strip().upper()
+
+    descuento = request.form["descuento"]
+
+    fecha_desde = request.form["fecha_desde"]
+
+    fecha_hasta = request.form["fecha_hasta"]
+
+    max_usos = request.form.get("max_usos")
+
+    activo = 1 if request.form.get("activo") else 0
+
+    if max_usos == "":
+        max_usos = None
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # Verificar si ya existe el código para este evento
+    cursor.execute("""
+        SELECT id
+        FROM cupones
+        WHERE evento_id=%s
+        AND UPPER(clave)=UPPER(%s)
+    """, (evento_id, clave))
+
+    if cursor.fetchone():
+
+        cursor.close()
+        conn.close()
+
+        salida = f"""
+        <h2>⚠ Cupón duplicado</h2>
+
+        Ya existe un cupón con el código:
+
+        <h3>{clave}</h3>
+
+        <br>
+
+        <a href="/evento/{evento_id}/nuevo_cupon">
+            <button>Volver</button>
+        </a>
+        """
+
+        return layout(salida, evento_id=evento_id)
+
+    cursor.execute("""
+        INSERT INTO cupones
+        (
+            evento_id,
+            clave,
+            descuento,
+            fecha_desde,
+            fecha_hasta,
+            activo,
+            max_usos,
+            usos
+        )
+        VALUES
+        (%s,%s,%s,%s,%s,%s,%s,0)
+    """, (
+        evento_id,
+        clave,
+        descuento,
+        fecha_desde,
+        fecha_hasta,
+        activo,
+        max_usos
+    ))
+
+    conn.commit()
+
+    cursor.close()
+    conn.close()
+
+    return redirect(f"/evento/{evento_id}/cupones")
+@organizador_bp.route("/evento/<int:evento_id>/editar_cupon/<int:cupon_id>")
+def editar_cupon(evento_id, cupon_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+        SELECT *
+        FROM cupones
+        WHERE id=%s
+    """,(cupon_id,))
+
+    c = cursor.fetchone()
+
+    cursor.close()
+    conn.close()
+
+    checked = "checked" if c["activo"] else ""
+
+    max_usos = c["max_usos"] if c["max_usos"] else ""
+
+    salida = f"""
+    <h2>✏️ Editar cupón</h2>
+
+    <form method="POST"
+          action="/evento/{evento_id}/guardar_edicion_cupon/{cupon_id}">
+
+    Código<br>
+    <input type="text"
+           name="clave"
+           value="{c['clave']}"
+           required><br><br>
+
+    Descuento (%)<br>
+    <input type="number"
+           name="descuento"
+           value="{c['descuento']}"
+           min="1"
+           max="100"
+           required><br><br>
+
+    Fecha desde<br>
+    <input type="date"
+           name="fecha_desde"
+           value="{c['fecha_desde']}"><br><br>
+
+    Fecha hasta<br>
+    <input type="date"
+           name="fecha_hasta"
+           value="{c['fecha_hasta']}"><br><br>
+
+    Máximo usos<br>
+    <input type="number"
+           name="max_usos"
+           value="{max_usos}"><br><br>
+
+    <label>
+        <input type="checkbox"
+               name="activo"
+               {checked}>
+        Activo
+    </label>
+
+    <br><br>
+
+    <button>
+        💾 Guardar cambios
+    </button>
+
+    </form>
+    """
+
+    return layout(salida, evento_id=evento_id)
+@organizador_bp.route("/evento/<int:evento_id>/guardar_edicion_cupon/<int:cupon_id>", methods=["POST"])
+def guardar_edicion_cupon(evento_id, cupon_id):
+
+    clave = request.form["clave"].strip().upper()
+    descuento = request.form["descuento"]
+    fecha_desde = request.form["fecha_desde"]
+    fecha_hasta = request.form["fecha_hasta"]
+
+    max_usos = request.form.get("max_usos")
+    if max_usos == "":
+        max_usos = None
+
+    activo = 1 if request.form.get("activo") else 0
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # Verificar si ya existe otro cupón con el mismo código
+    cursor.execute("""
+        SELECT id
+        FROM cupones
+        WHERE evento_id=%s
+        AND UPPER(clave)=UPPER(%s)
+        AND id<>%s
+    """, (evento_id, clave, cupon_id))
+
+    if cursor.fetchone():
+
+        cursor.close()
+        conn.close()
+
+        salida = f"""
+        <h2>⚠ Cupón duplicado</h2>
+
+        Ya existe otro cupón con el código:
+
+        <h3>{clave}</h3>
+
+        <br>
+
+        <a href="/evento/{evento_id}/cupones">
+            <button>Volver</button>
+        </a>
+        """
+
+        return layout(salida, evento_id=evento_id)
+
+    cursor.execute("""
+        UPDATE cupones
+        SET
+            clave=%s,
+            descuento=%s,
+            fecha_desde=%s,
+            fecha_hasta=%s,
+            max_usos=%s,
+            activo=%s
+        WHERE id=%s
+    """,(
+        clave,
+        descuento,
+        fecha_desde,
+        fecha_hasta,
+        max_usos,
+        activo,
+        cupon_id
+    ))
+
+    conn.commit()
+
+    cursor.close()
+    conn.close()
+
+    return redirect(f"/evento/{evento_id}/cupones")
+
+@organizador_bp.route("/evento/<int:evento_id>/eliminar_cupon/<int:cupon_id>")
+def eliminar_cupon(evento_id, cupon_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        DELETE FROM cupones
+        WHERE id=%s
+    """,(cupon_id,))
+
+    conn.commit()
+
+    cursor.close()
+    conn.close()
+
+    return redirect(f"/evento/{evento_id}/cupones")
+@organizador_bp.route("/evento/<int:evento_id>/exportar_excel")
+def exportar_excel(evento_id):
+
+    estado = request.args.get("estado")
+    distancia = request.args.get("distancia")
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT nombre FROM eventos WHERE id = %s", (evento_id,))
+    evento = cursor.fetchone()
+    nombre_evento = evento["nombre"]
+    query = """
+    SELECT
+        i.id,
+        e.nombre AS evento,
+        i.numero_inscripcion,
+        p.nombre,
+        p.apellido,
+        p.dni,
+        p.email,
+        p.fecha_nac,
+        p.genero,
+        c.nombre AS categoria,
+        p.ciudad,
+        p.direccion,
+        pa.nombre AS pais,
+        prov.nombre AS provincia,
+        d.nombre AS distancia,        
+        i.estado_pago,
+        pay.monto_total AS monto_pagado,
+        pay.fecha_pago,
+        i.fecha_inscripcion,        
+        i.dorsal,
+        i.talle_remera,
+        t.nombre AS team
+    FROM inscripciones i
+    JOIN personas p ON p.id = i.persona_id
+    JOIN distancias d ON d.id = i.distancia_id
+    LEFT JOIN teams t ON t.id = p.team_id
+    LEFT JOIN provincias prov ON prov.id = p.provincia_id
+    LEFT JOIN paises pa ON pa.id = p.pais_id
+    LEFT JOIN categorias c ON c.id = i.categoria_id
+    LEFT JOIN (
+        SELECT 
+            inscripcion_id,
+            SUM(monto) AS monto_total,
+            MAX(fecha_confirmacion) AS fecha_pago
+        FROM pagos
+        WHERE estado IN ('pagado','aprobado')
+        GROUP BY inscripcion_id
+    ) pay ON pay.inscripcion_id = i.id
+    JOIN eventos e ON e.id = i.evento_id
+    WHERE i.evento_id = %s
+    """
+
+    params = [evento_id]
+
+    # filtro estado
+    if estado:
+        if estado == "pagado":
+            query += " AND i.estado_pago = 'pagado'"
+        else:
+            query += " AND i.estado_pago = %s"
+            params.append(estado)
+
+    # filtro distancia
+    if distancia:
+        query += " AND i.distancia_id = %s"
+        params.append(distancia)
+
+    cursor.execute(query, params)
+    datos = cursor.fetchall()
+
+    # -------------------------
+    # CAMPOS EXTRA
+    # -------------------------
+
+    cursor.execute("""
+    SELECT dc.id, dc.nombre
+    FROM distancia_campos dc
+    JOIN distancias d
+        ON d.id = dc.distancia_id
+    WHERE d.evento_id = %s
+    ORDER BY dc.id
+    """, (evento_id,))
+
+    
+
+    campos_extra = cursor.fetchall()
+    usar_campos_extra = len(campos_extra) > 0
+
+    print("CAMPOS EXTRA:", len(campos_extra))
+    print("USAR CAMPOS EXTRA:", usar_campos_extra)
+
+    cursor.close()
+    conn.close()
+    
+
+# 🧾 CREAR EXCEL
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Participantes"
+
+    # encabezados
+    headers = [
+        "Evento",
+        "Código",
+        "Nombre",
+        "Apellido",
+        "DNI",
+        "Email",
+        "Fecha Nacimiento",
+        "Edad",
+        "Género",
+        "Categoría",
+        "Provincia",
+        "País",
+        "Ciudad",
+        "Dirección",
+        "Distancia",
+        "Estado",
+        "Monto Pagado",
+        "Fecha Pago",
+        "Fecha inscripción",
+        "Dorsal",
+        "Team",
+        "Talle Remera"
+    ]
+
+    for campo in campos_extra:
+        headers.append(campo["nombre"])
+
+    ws.append(headers)
+
+
+    from datetime import date
+    print("REGISTROS:", len(datos))
+
+    # cargar todas las respuestas de una sola vez
+    respuestas_por_inscripcion = {}
+
+    if usar_campos_extra:
+
+        conn2 = get_db_connection()
+        cursor2 = conn2.cursor(dictionary=True)
+
+        cursor2.execute("""
+        SELECT inscripcion_id, campo_id, valor
+        FROM inscripcion_respuestas
+        """)
+
+        todas_respuestas = cursor2.fetchall()
+
+        cursor2.close()
+        conn2.close()
+
+        for r in todas_respuestas:
+            respuestas_por_inscripcion.setdefault(
+                r["inscripcion_id"], {}
+            )[r["campo_id"]] = r["valor"]
+
+    for d in datos:
+
+        # calcular edad
+        edad = ""
+        if d["fecha_nac"]:
+            hoy = date.today()
+            fn = d["fecha_nac"]
+            edad = hoy.year - fn.year - ((hoy.month, hoy.day) < (fn.month, fn.day))
+
+        # estado
+        estado_txt = "Pagado" if d["estado_pago"] in ["pagado","aprobado"] else "Pendiente"
+
+        # respuestas campos extra
+
+        resp_dict = respuestas_por_inscripcion.get(
+            d["id"],
+            {}
+        )
+
+        fila = [
+            d["evento"],
+            d["numero_inscripcion"],
+            d["nombre"],
+            d["apellido"],
+            int(d["dni"]) if d["dni"] else "",
+            d["email"],
+            d["fecha_nac"].strftime("%d/%m/%Y") if d["fecha_nac"] else "",
+            edad,
+            d["genero"] or "",
+            d["categoria"] or "",
+            d["provincia"] or "",
+            d["pais"] or "",
+            d["ciudad"] or "",
+            d["direccion"] or "",
+            d["distancia"],
+            estado_txt,
+            d["monto_pagado"] or "",  # 💰 NUEVO
+            d["fecha_pago"].strftime("%d/%m/%Y %H:%M") if d["fecha_pago"] else "",
+            d["fecha_inscripcion"].strftime("%d/%m/%Y %H:%M") if d["fecha_inscripcion"] else "",
+            d["dorsal"] or "",
+            d["team"] or "",
+            d["talle_remera"] or ""
+]
+
+        for campo in campos_extra:
+            fila.append(
+                resp_dict.get(campo["id"], "")
+            )
+
+        ws.append(fila)
+    # guardar en memoria
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    import re
+    nombre_limpio = re.sub(r'[^a-zA-Z0-9]+', '_', nombre_evento).lower()
+
+    return send_file(
+        output,
+        download_name=f"participantes_{nombre_limpio}.xlsx",
+        as_attachment=True,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+@organizador_bp.route("/evento/<int:evento_id>/exportar_seguro")
+def exportar_seguro(evento_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    # nombre evento
+    cursor.execute("SELECT nombre FROM eventos WHERE id = %s", (evento_id,))
+    evento = cursor.fetchone()
+    nombre_evento = evento["nombre"]
+
+    # datos simples para seguro
+    cursor.execute("""
+    SELECT
+        e.nombre AS evento,
+        p.apellido,
+        p.nombre,
+        p.dni,
+        p.fecha_nac,
+        p.genero,
+        p.ciudad,
+        d.nombre AS distancia
+    FROM inscripciones i
+    JOIN personas p ON p.id = i.persona_id
+    JOIN distancias d ON d.id = i.distancia_id
+    JOIN eventos e ON e.id = i.evento_id
+    WHERE i.evento_id = %s
+    """, (evento_id,))
+
+    datos = cursor.fetchall()
+    cursor.close()
+    conn.close()
+
+    # crear excel
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Seguro"
+
+    # encabezados
+    ws.append([
+        "Evento",
+        "Apellido",
+        "Nombre",
+        "DNI",
+        "Fecha Nacimiento",
+        "Edad",
+        "Género",
+        "Ciudad",
+        "Distancia"
+    ])
+
+    from datetime import date
+
+    for d in datos:
+
+        # calcular edad
+        edad = ""
+        if d["fecha_nac"]:
+            hoy = date.today()
+            fn = d["fecha_nac"]
+            edad = hoy.year - fn.year - ((hoy.month, hoy.day) < (fn.month, fn.day))
+
+        ws.append([
+            d["evento"],
+            d["apellido"],
+            d["nombre"],
+            int(d["dni"]) if d["dni"] else "",
+            d["fecha_nac"].strftime("%d/%m/%Y") if d["fecha_nac"] else "",
+            edad,
+            d["genero"] or "",
+            d["ciudad"] or "",
+            d["distancia"]
+        ])
+
+    # guardar en memoria
+    import io
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    # limpiar nombre evento
+    import re
+    nombre_limpio = re.sub(r'[^a-zA-Z0-9]+', '_', nombre_evento).lower()
+
+    return send_file(
+        output,
+        download_name=f"seguro_{nombre_limpio}.xlsx",
+        as_attachment=True,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
