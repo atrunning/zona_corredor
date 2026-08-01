@@ -177,28 +177,89 @@ def ver_inscriptos(evento_id):
     salida += "</div>"
 
     salida += f"""
-    <div style="margin-bottom:10px">
+    <div style="margin-bottom:15px">
 
-    <label>
-    <input type="checkbox"
-    {"checked" if mostrar_vencidos else ""}
-    onchange="window.location='?mostrar_vencidos='+(this.checked?1:0)">
-    Mostrar vencidos ({total_vencidos})
-    
-    </label>
+        <label>
+            <input type="checkbox"
+            {"checked" if mostrar_vencidos else ""}
+            onchange="window.location='?mostrar_vencidos='+(this.checked?1:0)">
+            Mostrar vencidos ({total_vencidos})
+        </label>
 
-    <br><br>
+        <br><br>
 
-    <input type="text" id="buscar"
-    placeholder="Buscar por nombre, DNI o email..."
-    style="
-    padding:8px;
-    width:350px;
-    border:1px solid #ccc;
-    border-radius:6px
-    ">
+        <div style="display:flex; align-items:center; gap:15px;">
+
+            <input type="text"
+                id="buscar"
+                placeholder="Buscar por nombre, DNI o email..."
+                style="
+                    padding:8px;
+                    width:380px;
+                    border:1px solid #ccc;
+                    border-radius:6px;
+                    height:38px;
+                    box-sizing:border-box;
+                ">
+
+            <input type="text"
+                id="buscar_referencia"
+                placeholder="Referencia MP"
+                onkeyup="buscarReferencia()"
+                style="
+                    padding:8px;
+                    width:220px;
+                    border:1px solid #ccc;
+                    border-radius:6px;
+                    height:38px;
+                    box-sizing:border-box;
+                ">
+
+        </div>
 
     </div>
+    """
+    salida += f"""
+    <script>
+
+    function buscarReferencia() {{
+
+        let referencia = document.getElementById("buscar_referencia").value.trim();
+
+        console.log("Referencia:", referencia);
+
+        if (referencia == "") {{
+
+            document.querySelectorAll("table tr").forEach(function(fila) {{
+                fila.style.display = "";
+            }});
+
+            return;
+        }}
+
+        console.log("/evento/{{evento_id}}/buscar_referencia?referencia=" + referencia);
+        
+        fetch("/evento/{evento_id}/buscar_referencia?referencia=" + encodeURIComponent(referencia))
+        .then(response => response.json())
+        .then(data => {{
+
+            if (data.ok) {{
+
+                let buscar = document.getElementById("buscar");
+
+                buscar.value = data.numero_inscripcion;
+
+                buscar.dispatchEvent(new Event("keyup"));
+
+            }}
+
+        }})
+        .catch(error => {{
+            console.error(error);
+            alert("Error al buscar la referencia.");
+        }});
+
+    </script>
     """
 
     # -----------------------
@@ -319,8 +380,9 @@ def ver_inscriptos(evento_id):
             respuestas[r["campo_id"]] = r["valor"]
 
         # 👇 RECIÉN ACÁ LO USÁS
+        
         salida += f"""
-        <tr>
+        <tr id="fila_{ins['numero_inscripcion']}">
         <td>{ins['numero_inscripcion']}</td>
         <td>{fecha}</td>
         <td>{ins['nombre']} {ins['apellido']}</td>
@@ -340,7 +402,6 @@ def ver_inscriptos(evento_id):
             salida += f"<td>{valor}</td>"
 
         salida += f"""
-
         <td>
 
         <a href="/inscripcion/{ins['numero_inscripcion']}">
@@ -412,6 +473,36 @@ def ver_inscriptos(evento_id):
     conn.close()
 
     return layout(salida)
+@organizador_bp.route("/evento/<int:evento_id>/buscar_referencia")
+def buscar_referencia(evento_id):
+
+    referencia = request.args.get("referencia", "").strip()
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+        SELECT i.numero_inscripcion
+        FROM pagos p
+        JOIN inscripciones i
+            ON i.id = p.inscripcion_id
+        WHERE i.evento_id = %s
+          AND p.referencia_externa = %s
+        LIMIT 1
+    """, (evento_id, referencia))
+
+    fila = cursor.fetchone()
+
+    cursor.close()
+    conn.close()
+
+    if fila:
+        return jsonify({
+            "ok": True,
+            "numero_inscripcion": fila["numero_inscripcion"]
+        })
+
+    return jsonify({"ok": False})
 @organizador_bp.route("/inscripcion/<numero>/eliminar")
 def eliminar_inscripcion(numero):
 
@@ -2266,13 +2357,14 @@ def editar_inscripcion(numero):
         distancia_id = request.form.get("distancia_id")
 
         cursor.execute("""
-        SELECT id, distancia_id, estado_pago
+        SELECT id, evento_id, distancia_id, estado_pago
         FROM inscripciones
         WHERE numero_inscripcion = %s
         """, (numero,))
 
         ins = cursor.fetchone()
 
+        evento_id = ins["evento_id"]
         inscripcion_id = ins["id"]
         distancia_anterior = ins["distancia_id"]
         estado_pago = ins["estado_pago"]
@@ -2342,24 +2434,27 @@ def editar_inscripcion(numero):
         # VALIDAR DORSAL REPETIDO
         # -------------------------
         if dorsal:
-
             cursor.execute("""
-            SELECT numero_inscripcion
-            FROM inscripciones
-            WHERE dorsal = %s
-            AND numero_inscripcion <> %s
-            """, (dorsal, numero))
+                SELECT numero_inscripcion
+                FROM inscripciones
+                WHERE evento_id = %s
+                AND dorsal = %s
+                AND numero_inscripcion <> %s
+            """, (evento_id, dorsal, numero))
 
             existe = cursor.fetchone()
 
-            if existe:
+            print("EVENTO:", evento_id)
+            print("DORSAL:", dorsal)
+            print("NUMERO:", numero)
+            print("EXISTE:", existe)
 
+            if existe:
                 cursor.close()
                 conn.close()
-
                 return f"""
                 <script>
-                alert("El dorsal {dorsal} ya está asignado.");
+                alert("El dorsal {dorsal} ya está asignado en este evento.");
                 history.back();
                 </script>
                 """
