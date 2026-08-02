@@ -120,9 +120,7 @@ def ver_inscriptos(evento_id):
     """, (evento_id,))
 
     campos_extra = cursor.fetchall()
-    print("CAMPOS EXTRA:", campos_extra)
-
-    
+        
 
     salida = f"""
     <a href="/evento/{evento_id}/panel" style="
@@ -329,7 +327,7 @@ def ver_inscriptos(evento_id):
         
 
     for ins in inscriptos:
-        print("TEAM RAW:", ins.get("team"))
+        
         # 🔥 LIMPIAR TEAM PRIMERO
         team = ins.get("team")
 
@@ -978,7 +976,7 @@ def buscar_persona(evento_id):
     """,(dni,))
 
     persona = cursor.fetchone()
-    print(persona)
+    
 
     if not persona:
 
@@ -2283,9 +2281,7 @@ def campos_distancia(distancia_id):
     return layout(salida)
 @organizador_bp.route("/inscripcion/<numero>", methods=["GET","POST"])
 def editar_inscripcion(numero):
-    print(len(numero))
-    print("NUMERO:", numero)
-    print("DEBUG:", repr(numero))
+    
     salida = ""
     tab = request.args.get("tab", "resumen")
     
@@ -2402,8 +2398,7 @@ def editar_inscripcion(numero):
                 conn.commit()
                 team_id = cursor.lastrowid
 
-        print("TEAM ID FINAL:", team_id)
-        print("NUMERO:", numero)
+        
         cursor.execute("""
         UPDATE personas
         SET nombre=%s,
@@ -2428,8 +2423,7 @@ def editar_inscripcion(numero):
             instagram,facebook,strava,fecha_nac,
             genero,team_id,numero
         ))
-        print("DISTANCIA RECIBIDA:", distancia_id)
-
+       
         # -------------------------
         # VALIDAR DORSAL REPETIDO
         # -------------------------
@@ -2444,10 +2438,7 @@ def editar_inscripcion(numero):
 
             existe = cursor.fetchone()
 
-            print("EVENTO:", evento_id)
-            print("DORSAL:", dorsal)
-            print("NUMERO:", numero)
-            print("EXISTE:", existe)
+            
 
             if existe:
                 cursor.close()
@@ -2522,11 +2513,10 @@ def editar_inscripcion(numero):
 
         for campo in campos_extra:
 
-            print("CAMPO:", campo["id"], campo["nombre"])
-
+            
             valor = request.form.get(f"campo_{campo['id']}", "")
 
-            print("VALOR:", valor)
+            
 
             cursor.execute("""
             INSERT INTO inscripcion_respuestas
@@ -2585,8 +2575,7 @@ def editar_inscripcion(numero):
 
     
     inscripcion_id = ins["id"]
-    print("ID INSCRIPCION:", inscripcion_id)
-
+    
     if ins and ins.get("fecha_nac"):
         ins["fecha_nac"] = ins["fecha_nac"].strftime("%Y-%m-%d")
     
@@ -2778,10 +2767,17 @@ def editar_inscripcion(numero):
     # 🔥 TODO ESTO JUNTO
     salida += f"""
     </select><br><br>
+    <div style="margin:10px 0;font-size:18px;">
+        <b>Talle remera:</b>
+        <span style="color:#0d6efd;font-size:22px;font-weight:bold;">
+            {ins["talle_remera"] or "-"}
+        </span>
+    </div>
 
     Fecha inscripción: {ins['fecha_inscripcion']}<br>
     Estado pago: {ins['estado_pago']}<br>
     Team: {ins.get('team','-')}<br>
+    
 
     </div>
 
@@ -2890,7 +2886,7 @@ def editar_inscripcion(numero):
 
             salida += "</select><br><br>"
     
-    print("EVENTO INS:", ins["evento_id"])
+    
     cursor.execute("""
     SELECT talle FROM talles_evento
     WHERE evento_id = %s
@@ -3073,9 +3069,7 @@ def editar_inscripcion(numero):
     </script>
     """
     
-    print("TAB ARGS:", request.args.get("tab"))
-    print("TAB FINAL:", tab)
-    
+        
     salida += "<script>const teams = ["
 
     for t in teams:
@@ -3139,13 +3133,12 @@ def editar_inscripcion(numero):
     
 @organizador_bp.route("/test_pago")
 def test_pago():
-    print("🔥 ENTRE A TEST")
+    
     return "FUNCIONA TEST"   
 
 @organizador_bp.route("/inscripcion/<numero>/pago", methods=["GET","POST"])
 def pantalla_pago(numero):
-    print("METHOD:", request.method)
-    print("ENTRE A PANTALLA PAGO")
+    
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
@@ -3157,7 +3150,7 @@ def pantalla_pago(numero):
     """, (numero,))
 
     info = cursor.fetchone()
-    print("INFO:", info)
+    
 
     if not info:
         return layout("<h2>Inscripción no encontrada</h2>")
@@ -3202,7 +3195,7 @@ def pantalla_pago(numero):
         from flask import redirect
         return redirect(f"/inscripcion/{numero}?ok=1&tab=pago")
     
-    print("HTML NUEVOOOOO")
+    
     return layout(f"""
     <h2>Registrar pago</h2>
 
@@ -4397,9 +4390,7 @@ def exportar_excel(evento_id):
     campos_extra = cursor.fetchall()
     usar_campos_extra = len(campos_extra) > 0
 
-    print("CAMPOS EXTRA:", len(campos_extra))
-    print("USAR CAMPOS EXTRA:", usar_campos_extra)
-
+   
     cursor.close()
     conn.close()
     
@@ -4442,7 +4433,7 @@ def exportar_excel(evento_id):
 
 
     from datetime import date
-    print("REGISTROS:", len(datos))
+    
 
     # cargar todas las respuestas de una sola vez
     respuestas_por_inscripcion = {}

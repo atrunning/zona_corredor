@@ -46,7 +46,7 @@ def slugify(texto):
 
 app.register_blueprint(organizador_bp)
 app.register_blueprint(eventos_bp)
-print("🔥 VERSION NUEVA 1.6.2 🔥")
+print("🔥 VERSION NUEVA 1.6.3 🔥")
 
 def layout(contenido, menu=True, evento_id=None, eventos=None):
 
@@ -826,7 +826,7 @@ def pagar_mp(numero):
 
     preference_response = sdk.preference().create(preference_data)
 
-    print(preference_response)
+    
 
     if preference_response["status"] != 201:
         return str(preference_response)
@@ -1584,9 +1584,7 @@ def ver_evento(evento_id):
     """, (evento_id,))
 
     total_visitas = cursor.fetchone()["total"]
-    print("TOTAL VISITAS:", total_visitas)
-    print("ESTADISTICAS:", estadisticas_visitas)
-
+    
     cursor.execute("""
     SELECT access_token_mp
     FROM organizadores
@@ -2202,7 +2200,7 @@ def recordar_pendientes(evento_id):
             enviados += 1
 
         except Exception as e:
-            print("ERROR MAIL:", e)
+            
 
     cursor.execute("""
     UPDATE eventos
