@@ -2200,6 +2200,7 @@ def recordar_pendientes(evento_id):
             enviados += 1
 
         except Exception as e:
+            print("Error enviando mail:", e)
             
 
     cursor.execute("""
