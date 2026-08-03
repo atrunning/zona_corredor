@@ -224,19 +224,12 @@ def ver_inscriptos(evento_id):
 
         let referencia = document.getElementById("buscar_referencia").value.trim();
 
-        console.log("Referencia:", referencia);
-
         if (referencia == "") {{
-
-            document.querySelectorAll("table tr").forEach(function(fila) {{
-                fila.style.display = "";
-            }});
-
+            document.getElementById("buscar").value = "";
+            document.getElementById("buscar").dispatchEvent(new KeyboardEvent("keyup"));
             return;
         }}
 
-        console.log("/evento/{{evento_id}}/buscar_referencia?referencia=" + referencia);
-        
         fetch("/evento/{evento_id}/buscar_referencia?referencia=" + encodeURIComponent(referencia))
         .then(response => response.json())
         .then(data => {{
@@ -244,18 +237,28 @@ def ver_inscriptos(evento_id):
             if (data.ok) {{
 
                 let buscar = document.getElementById("buscar");
+                buscar.value = data.numero_inscripcion.toLowerCase();
 
-                buscar.value = data.numero_inscripcion;
+                let filas = document.querySelectorAll("#tabla_inscriptos tr");
 
-                buscar.dispatchEvent(new Event("keyup"));
+                filas.forEach(function(fila, index){{
+
+                    if(index === 0) return;
+
+                    let texto = fila.innerText.toLowerCase();
+
+                    fila.style.display = texto.includes(buscar.value) ? "" : "none";
+
+                }});
+
+            }} else {{
+
+                alert("No se encontró esa referencia.");
 
             }}
-
-        }})
-        .catch(error => {{
-            console.error(error);
-            alert("Error al buscar la referencia.");
         }});
+
+    }}
 
     </script>
     """
