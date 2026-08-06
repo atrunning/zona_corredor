@@ -727,11 +727,10 @@ def pagar_mp(numero):
         i.id,
         i.numero_inscripcion,
         i.cupon_id,
-
         d.precio,
-
+        d.fecha_inicio_inscripcion,
+        d.fecha_fin_inscripcion,
         c.descuento,
-
         o.access_token_mp
 
     FROM inscripciones i
@@ -758,15 +757,43 @@ def pagar_mp(numero):
     cursor.close()
     conn.close()
 
+    
     if not ins:
         return "Inscripción no encontrada"
 
     if not ins["access_token_mp"]:
         return "El organizador no tiene Mercado Pago conectado"
 
+    from datetime import datetime
+
+    ahora = datetime.now()
+
+    if ins["fecha_inicio_inscripcion"] and ahora < ins["fecha_inicio_inscripcion"]:
+        return "Las inscripciones para esta distancia todavía no comenzaron."
+
+    if ins["fecha_fin_inscripcion"] and ahora > ins["fecha_fin_inscripcion"]:
+        return f"""
+        <div style="
+        max-width:500px;
+        margin:80px auto;
+        padding:30px;
+        background:white;
+        border-radius:12px;
+        box-shadow:0 4px 15px rgba(0,0,0,.15);
+        text-align:center;
+        font-family:Arial;
+        ">
+            <h2>⏰ Inscripciones cerradas</h2>
+            <p>La fecha de inscripción para esta distancia ya finalizó.</p>
+            <br>
+            <button onclick="history.back()">Volver</button>
+        </div>
+        """
+
     inscripcion_id = ins["id"]
     precio_original = float(ins["precio"])
 
+    
     precio = precio_original
 
     # 🎟️ aplicar cupón
@@ -1046,8 +1073,57 @@ def pagar_evento(evento_id):
 @app.route("/reactivar_pago/<numero>")
 def reactivar_pago(numero):
 
+    from datetime import datetime
+
     conn = get_db_connection()
-    cursor = conn.cursor()
+    cursor = conn.cursor(dictionary=True)
+
+    # Buscar la inscripción y la fecha de cierre de la distancia
+    cursor.execute("""
+    SELECT
+        i.id,
+        d.fecha_inicio_inscripcion,
+        d.fecha_fin_inscripcion
+    FROM inscripciones i
+    JOIN distancias d
+        ON d.id = i.distancia_id
+    WHERE i.numero_inscripcion = %s
+    """, (numero,))
+
+    ins = cursor.fetchone()
+
+    if not ins:
+        cursor.close()
+        conn.close()
+        return "Inscripción no encontrada"
+
+    ahora = datetime.now()
+
+    if ins["fecha_inicio_inscripcion"] and ahora < ins["fecha_inicio_inscripcion"]:
+        cursor.close()
+        conn.close()
+        return "Las inscripciones para esta distancia todavía no comenzaron."
+
+    if ins["fecha_fin_inscripcion"] and ahora > ins["fecha_fin_inscripcion"]:
+        cursor.close()
+        conn.close()
+        return f"""
+        <div style="
+        max-width:500px;
+        margin:80px auto;
+        padding:30px;
+        background:white;
+        border-radius:12px;
+        box-shadow:0 4px 15px rgba(0,0,0,.15);
+        text-align:center;
+        font-family:Arial;
+        ">
+            <h2>⏰ Inscripciones cerradas</h2>
+            <p>La fecha de inscripción para esta distancia ya finalizó.</p>
+            <br>
+            <button onclick="history.back()">Volver</button>
+        </div>
+        """
 
     cursor.execute("""
     UPDATE inscripciones
@@ -1062,7 +1138,7 @@ def reactivar_pago(numero):
     cursor.close()
     conn.close()
 
-    return redirect(url_for("pagar_mp", numero=numero))    
+    return redirect(url_for("pagar_mp", numero=numero))  
 @app.route("/evento/<int:evento_id>/verificar", methods=["POST"])
 def verificar_evento(evento_id):
 
