@@ -46,7 +46,7 @@ def slugify(texto):
 
 app.register_blueprint(organizador_bp)
 app.register_blueprint(eventos_bp)
-print("🔥 VERSION NUEVA 1.6.3 🔥")
+print("🔥 VERSION NUEVA 1.6.4 🔥")
 
 def layout(contenido, menu=True, evento_id=None, eventos=None):
 
@@ -766,7 +766,7 @@ def pagar_mp(numero):
 
     from datetime import datetime
 
-    ahora = datetime.now()
+    ahora = date.today()
 
     if ins["fecha_inicio_inscripcion"] and ahora < ins["fecha_inicio_inscripcion"]:
         return "Las inscripciones para esta distancia todavía no comenzaron."
@@ -1097,7 +1097,7 @@ def reactivar_pago(numero):
         conn.close()
         return "Inscripción no encontrada"
 
-    ahora = datetime.now()
+    ahora = date.today()
 
     if ins["fecha_inicio_inscripcion"] and ahora < ins["fecha_inicio_inscripcion"]:
         cursor.close()
