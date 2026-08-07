@@ -4322,6 +4322,7 @@ def exportar_excel(evento_id):
         p.apellido,
         p.dni,
         p.email,
+        p.celular,
         p.fecha_nac,
         p.genero,
         c.nombre AS categoria,
@@ -4411,6 +4412,7 @@ def exportar_excel(evento_id):
         "Apellido",
         "DNI",
         "Email",
+        "celular",
         "Fecha Nacimiento",
         "Edad",
         "Género",
@@ -4487,6 +4489,7 @@ def exportar_excel(evento_id):
             d["apellido"],
             int(d["dni"]) if d["dni"] else "",
             d["email"],
+            d["celular"],
             d["fecha_nac"].strftime("%d/%m/%Y") if d["fecha_nac"] else "",
             edad,
             d["genero"] or "",
@@ -4546,7 +4549,8 @@ def exportar_seguro(evento_id):
         p.fecha_nac,
         p.genero,
         p.ciudad,
-        d.nombre AS distancia
+        d.nombre AS distancia,
+        i.estado_pago
     FROM inscripciones i
     JOIN personas p ON p.id = i.persona_id
     JOIN distancias d ON d.id = i.distancia_id
@@ -4575,6 +4579,7 @@ def exportar_seguro(evento_id):
         "Género",
         "Ciudad",
         "Distancia"
+        "estado pago"
     ])
 
     from datetime import date
@@ -4597,7 +4602,8 @@ def exportar_seguro(evento_id):
             edad,
             d["genero"] or "",
             d["ciudad"] or "",
-            d["distancia"]
+            d["distancia"],
+            d["estado_pago"]
         ])
 
     # guardar en memoria

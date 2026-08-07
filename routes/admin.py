@@ -10,24 +10,44 @@ def admin():
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
+    # Visitas totales
     cursor.execute("""
         SELECT COUNT(*) AS total
         FROM visitas_evento
     """)
+    visitas_total = cursor.fetchone()["total"]
 
-    visitas = cursor.fetchone()["total"]
+    # Visitas hoy
+    cursor.execute("""
+        SELECT COUNT(*) AS total
+        FROM visitas_evento
+        WHERE DATE(fecha) = CURDATE()
+    """)
+    visitas_hoy = cursor.fetchone()["total"]
 
-    # Inscriptos
+    
+    # Inscriptos totales
     cursor.execute("""
         SELECT COUNT(*) AS total
         FROM inscripciones
     """)
-    inscriptos = cursor.fetchone()["total"]
+    inscriptos_total = cursor.fetchone()["total"]
 
-    # Eventos
+    # Inscriptos hoy
+    cursor.execute("""
+        SELECT COUNT(*) AS total
+        FROM inscripciones
+        WHERE DATE(fecha_inscripcion) = CURDATE()
+    """)
+    inscriptos_hoy = cursor.fetchone()["total"]
+
+    # Eventos activos
     cursor.execute("""
         SELECT COUNT(*) AS total
         FROM eventos
+        WHERE activo = 1
+        AND publicado = 1
+        AND estado = 'abierto'
     """)
     eventos = cursor.fetchone()["total"]
 
@@ -43,8 +63,10 @@ def admin():
 
     return render_template(
         "admin/dashboard.html",
-        visitas=visitas,
-        inscriptos=inscriptos,
+        visitas_total=visitas_total,
+        visitas_hoy=visitas_hoy,
+        inscriptos_total=inscriptos_total,
+        inscriptos_hoy=inscriptos_hoy,
         eventos=eventos,
         organizadores=organizadores
     )
