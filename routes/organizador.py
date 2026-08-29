@@ -1278,60 +1278,81 @@ def talles_form(evento_id):
 
     return layout(salida,evento_id=evento_id)
 @organizador_bp.route("/evento/<int:evento_id>/guardar_stock", methods=["POST"])
-def guardar_stock(evento_id):
-
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
-
-    cursor.execute("""
-    SELECT id,talle
-    FROM stock_remeras
-    WHERE evento_id=%s
-    """,(evento_id,))
-
-    talles = cursor.fetchall()
-
-    for t in talles:
-
-        stock = request.form.get(f"stock_{t['talle']}")
-        activo = 1 if request.form.get(f"activo_{t['id']}") else 0
-
-        cursor.execute("""
-        UPDATE stock_remeras
-        SET stock=%s,
-            activo=%s
-        WHERE id=%s
-        """, (
-            stock,
-            activo,
-            t["id"]
+def guardar_stock(evento_id): 
+ 
+    conn = get_db_connection() 
+    cursor = conn.cursor(dictionary=True) 
+ 
+    cursor.execute(""" 
+    SELECT id,talle 
+    FROM stock_remeras 
+    WHERE evento_id=%s 
+    """,(evento_id,)) 
+ 
+    talles = cursor.fetchall() 
+ 
+    for t in talles: 
+ 
+        stock = request.form.get(f"stock_{t['talle']}") 
+        activo = 1 if request.form.get(f"activo_{t['id']}") else 0 
+ 
+        cursor.execute(""" 
+        UPDATE stock_remeras 
+        SET stock=%s, 
+            activo=%s 
+        WHERE id=%s 
+        """, ( 
+            stock, 
+            activo, 
+            t["id"] 
+        )) 
+ 
+    nuevos_talles = request.form.getlist("nuevo_talle[]") 
+    nuevos_stock = request.form.getlist("nuevo_stock[]") 
+ 
+    for talle, stock in zip(nuevos_talles, nuevos_stock): 
+ 
+        talle = talle.strip() 
+ 
+        if talle == "": 
+            continue 
+ 
+        cursor.execute(""" 
+            INSERT INTO stock_remeras 
+            (evento_id, talle, stock) 
+            VALUES (%s,%s,%s) 
+        """, ( 
+            evento_id, 
+            talle, 
+            stock 
         ))
 
-    nuevos_talles = request.form.getlist("nuevo_talle[]")
-    nuevos_stock = request.form.getlist("nuevo_stock[]")
-
-    for talle, stock in zip(nuevos_talles, nuevos_stock):
-
-        talle = talle.strip()
-
-        if talle == "":
-            continue
-
-        cursor.execute("""
-            INSERT INTO stock_remeras
-            (evento_id, talle, stock)
-            VALUES (%s,%s,%s)
-        """, (
-            evento_id,
-            talle,
-            stock
-        ))    
-
-    conn.commit()
-
-    cursor.close()
-    conn.close()
-
+    # Sincronizar talles_evento con los talles activos de stock_remeras
+    cursor.execute( 
+        "DELETE FROM talles_evento WHERE evento_id = %s", 
+        (evento_id,) 
+    ) 
+ 
+    cursor.execute(""" 
+        SELECT DISTINCT talle 
+        FROM stock_remeras 
+        WHERE evento_id = %s 
+          AND activo = 1 
+        ORDER BY talle 
+    """, (evento_id,)) 
+ 
+    talles_activos = cursor.fetchall() 
+ 
+    for t in talles_activos: 
+        cursor.execute(""" 
+            INSERT INTO talles_evento (evento_id, talle) 
+            VALUES (%s, %s) 
+        """, (evento_id, t["talle"])) 
+ 
+    conn.commit() 
+    cursor.close() 
+    conn.close() 
+ 
     return redirect(f"/evento/{evento_id}/talles_form")
 @organizador_bp.route("/evento/<int:evento_id>/eliminar_talle/<int:id>")
 def eliminar_talle(evento_id, id):
