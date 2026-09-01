@@ -2287,6 +2287,7 @@ def campos_distancia(distancia_id):
         <th>Nombre</th>
         <th>Tipo</th>
         <th>Obligatorio</th>
+        <th>Acciones</th>
     </tr>
     """
 
@@ -2297,10 +2298,158 @@ def campos_distancia(distancia_id):
             <td>{c['nombre']}</td>
             <td>{c['tipo']}</td>
             <td>{"✅" if c['obligatorio'] else "❌"}</td>
+
+            <td>
+                <a href="/campo/{c['id']}/editar">
+                    <button type="button">✏️ Editar</button>
+                </a>
+            </td>
+
         </tr>
         """
 
     salida += "</table>"
+
+    return layout(salida)
+@organizador_bp.route("/campo/<int:campo_id>/editar", methods=["GET","POST"])
+def editar_campo(campo_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    # Buscar campo
+    cursor.execute("""
+    SELECT *
+    FROM distancia_campos
+    WHERE id = %s
+    """, (campo_id,))
+
+    campo = cursor.fetchone()
+
+    if not campo:
+        cursor.close()
+        conn.close()
+        return "Campo no encontrado"
+
+    distancia_id = campo["distancia_id"]
+
+    # -------------------------
+    # GUARDAR CAMBIOS
+    # -------------------------
+    if request.method == "POST":
+
+        nombre = request.form.get("nombre")
+        tipo = request.form.get("tipo")
+        obligatorio = 1 if request.form.get("obligatorio") else 0
+        opciones = request.form.get("opciones")
+
+        cursor.execute("""
+        UPDATE distancia_campos
+        SET
+            nombre = %s,
+            tipo = %s,
+            obligatorio = %s,
+            opciones = %s
+        WHERE id = %s
+        """, (
+            nombre,
+            tipo,
+            obligatorio,
+            opciones,
+            campo_id
+        ))
+
+        conn.commit()
+
+        cursor.close()
+        conn.close()
+
+        return redirect(
+            f"/distancia/{distancia_id}/campos"
+        )
+
+    cursor.close()
+    conn.close()
+
+    # -------------------------
+    # FORMULARIO
+    # -------------------------
+
+    salida = f"""
+    <h1>✏️ Editar campo extra</h1>
+
+    <form method="POST">
+
+        Nombre del campo<br>
+
+        <input
+            type="text"
+            name="nombre"
+            value="{campo['nombre']}"
+            required
+        >
+
+        <br><br>
+
+        Tipo<br>
+
+        <select name="tipo">
+
+            <option
+                value="texto"
+                {"selected" if campo['tipo'] == "texto" else ""}
+            >
+                Texto
+            </option>
+
+            <option
+                value="select"
+                {"selected" if campo['tipo'] == "select" else ""}
+            >
+                Select
+            </option>
+
+        </select>
+
+        <br><br>
+
+        Opciones (solo para select)<br>
+
+        <input
+            type="text"
+            name="opciones"
+            value="{campo['opciones'] or ''}"
+            placeholder="XS,S,M,L"
+        >
+
+        <br><br>
+
+        <label>
+
+            <input
+                type="checkbox"
+                name="obligatorio"
+                {"checked" if campo['obligatorio'] else ""}
+            >
+
+            Obligatorio
+
+        </label>
+
+        <br><br>
+
+        <button type="submit">
+            💾 Guardar cambios
+        </button>
+
+        <a href="/distancia/{distancia_id}/campos">
+            <button type="button">
+                Cancelar
+            </button>
+        </a>
+
+    </form>
+    """
 
     return layout(salida)
 @organizador_bp.route("/inscripcion/<numero>", methods=["GET","POST"])
