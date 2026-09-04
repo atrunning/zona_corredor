@@ -17,6 +17,15 @@ def ver_inscriptos(evento_id):
     tab = request.args.get("tab") or "resumen"
     mostrar_vencidos = request.args.get("mostrar_vencidos") == "1"
 
+    pagina = request.args.get("pagina", 1, type=int)
+    buscar = request.args.get("buscar", "").strip()
+
+    if pagina < 1:
+        pagina = 1
+
+    por_pagina = 5
+    offset = (pagina - 1) * por_pagina
+
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
@@ -99,11 +108,103 @@ def ver_inscriptos(evento_id):
     if not mostrar_vencidos:
         sql += " AND i.estado_pago <> 'vencido' "
 
-    sql += " ORDER BY i.fecha_inscripcion DESC "
+    parametros = [evento_id]
 
-    cursor.execute(sql, (evento_id,))
-    inscriptos = cursor.fetchall()    
+    if buscar:
 
+        sql += """
+        AND (
+            LOWER(p.nombre) LIKE %s
+            OR LOWER(p.apellido) LIKE %s
+            OR LOWER(CONCAT(p.nombre, ' ', p.apellido)) LIKE %s
+            OR p.dni LIKE %s
+            OR LOWER(p.email) LIKE %s
+        )
+        """
+
+        filtro = f"%{buscar.lower()}%"
+
+        parametros.extend([
+            filtro,
+            filtro,
+            filtro,
+            filtro,
+            filtro
+        ])    
+
+    # ---------------------------
+    # Total de inscriptos a mostrar
+    # ---------------------------
+
+    sql_total = """
+    SELECT COUNT(*) AS total
+    FROM inscripciones i
+    JOIN personas p ON p.id = i.persona_id
+    WHERE i.evento_id = %s
+    """
+
+    parametros_total = [evento_id]
+
+    if not mostrar_vencidos:
+        sql_total += " AND i.estado_pago <> 'vencido' "
+
+    if buscar:
+
+        sql_total += """
+        AND (
+            LOWER(p.nombre) LIKE %s
+            OR LOWER(p.apellido) LIKE %s
+            OR LOWER(CONCAT(p.nombre, ' ', p.apellido)) LIKE %s
+            OR p.dni LIKE %s
+            OR LOWER(p.email) LIKE %s
+        )
+        """
+
+        filtro = f"%{buscar.lower()}%"
+
+        parametros_total.extend([
+            filtro,
+            filtro,
+            filtro,
+            filtro,
+            filtro
+        ])
+
+    cursor.execute(sql_total, parametros_total)
+
+    total_inscriptos = cursor.fetchone()["total"]
+
+    total_paginas = max(
+        1,
+        (total_inscriptos + por_pagina - 1) // por_pagina
+    )
+
+    # Por seguridad
+    if pagina > total_paginas:
+        pagina = total_paginas
+        offset = (pagina - 1) * por_pagina
+
+
+    # ---------------------------
+    # Listado paginado
+    # ---------------------------
+
+    sql += """
+    ORDER BY i.fecha_inscripcion DESC
+    LIMIT %s OFFSET %s
+    """
+
+    parametros.extend([
+    por_pagina,
+    offset
+    ])
+
+    cursor.execute(
+        sql,
+        parametros
+    )
+
+    inscriptos = cursor.fetchall()
     # ---------------------------
     # Campos extra del evento
     # ---------------------------
@@ -190,6 +291,7 @@ def ver_inscriptos(evento_id):
 
             <input type="text"
                 id="buscar"
+                value="{buscar}"
                 placeholder="Buscar por nombre, DNI o email..."
                 style="
                     padding:8px;
@@ -420,35 +522,89 @@ def ver_inscriptos(evento_id):
         """
 
     salida += "</table></div>"
+    inicio = offset + 1
+    fin = min(offset + por_pagina, total_inscriptos)
+
+    url_base = f"/evento/{evento_id}/inscriptos"
+
+    salida += f"""
+    <div style="
+        display:flex;
+        justify-content:center;
+        align-items:center;
+        gap:10px;
+        margin:20px 0;
+        flex-wrap:wrap;
+    ">
+
+    """
+
+    # Primera
+    if pagina > 1:
+        salida += f'''
+        <a href="{url_base}?pagina=1&mostrar_vencidos={1 if mostrar_vencidos else 0}">
+            <button>« Primera</button>
+        </a>
+
+        <a href="{url_base}?pagina={pagina - 1}&mostrar_vencidos={1 if mostrar_vencidos else 0}">
+            <button>‹ Anterior</button>
+        </a>
+        '''
+
+    salida += f"""
+    <span style="font-weight:bold">
+        Mostrando {inicio} a {fin} de {total_inscriptos}
+        | Página {pagina} de {total_paginas}
+    </span>
+    """
+
+    # Siguiente
+    if pagina < total_paginas:
+        salida += f'''
+        <a href="{url_base}?pagina={pagina + 1}&mostrar_vencidos={1 if mostrar_vencidos else 0}">
+            <button>Siguiente ›</button>
+        </a>
+
+        <a href="{url_base}?pagina={total_paginas}&mostrar_vencidos={1 if mostrar_vencidos else 0}">
+            <button>Última »</button>
+        </a>
+        '''
+
+    salida += "</div>"
 
     
 
     salida += """
     <script>
 
-    document.getElementById("buscar").addEventListener("keyup", function(){
+    let temporizadorBusqueda;
 
-        let filtro = this.value.toLowerCase()
+    document.getElementById("buscar").addEventListener("input", function() {
 
-        let filas = document.querySelectorAll("#tabla_inscriptos tr")
+        clearTimeout(temporizadorBusqueda);
 
-        filas.forEach(function(fila, index){
+        let texto = this.value.trim();
 
-            if(index === 0) return   // salta el encabezado
+        temporizadorBusqueda = setTimeout(function() {
 
-            let texto = fila.innerText.toLowerCase()
+            let url = new URL(window.location.href);
 
-            if(texto.includes(filtro)){
-                fila.style.display = ""
+            if (texto) {
+                url.searchParams.set("buscar", texto);
             } else {
-                fila.style.display = "none"
+                url.searchParams.delete("buscar");
             }
 
-        })
+            url.searchParams.set("pagina", "1");
 
-    })
+            window.location.href = url.toString();
+
+        }, 500);
+
+    });
 
     </script>
+
     """
     salida += f"""
     <script>
