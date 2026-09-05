@@ -23,7 +23,7 @@ def ver_inscriptos(evento_id):
     if pagina < 1:
         pagina = 1
 
-    por_pagina = 5
+    por_pagina = 100
     offset = (pagina - 1) * por_pagina
 
     conn = get_db_connection()
