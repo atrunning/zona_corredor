@@ -3640,7 +3640,7 @@ def editar_inscripcion(numero):
 
                 </div>
 
-            </div>
+            
             """
 
     salida += """
@@ -3660,6 +3660,9 @@ def editar_inscripcion(numero):
         </div>
     """
 
+    salida += """
+    </div>
+    """
                
        
 
