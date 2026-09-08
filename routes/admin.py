@@ -47,7 +47,7 @@ def admin():
         FROM eventos
         WHERE activo = 1
         AND publicado = 1
-        AND estado = 'abierto'
+        AND fecha >= CURDATE()
     """)
     eventos = cursor.fetchone()["total"]
 
@@ -57,6 +57,61 @@ def admin():
         FROM organizadores
     """)
     organizadores = cursor.fetchone()["total"]
+
+        # Resumen de inscripciones por eventos activos
+    cursor.execute("""
+        SELECT
+            e.id,
+            e.nombre,
+            e.fecha,
+            o.nombre AS organizador,
+
+            COUNT(i.id) AS total_inscriptos,
+
+            SUM(
+                CASE
+                    WHEN i.estado_pago = 'pagado' THEN 1
+                    ELSE 0
+                END
+            ) AS pagados,
+
+            SUM(
+                CASE
+                    WHEN i.estado_pago = 'pendiente' THEN 1
+                    ELSE 0
+                END
+            ) AS pendientes,
+
+            SUM(
+                CASE
+                    WHEN i.estado_pago = 'vencido' THEN 1
+                    ELSE 0
+                END
+            ) AS vencidos
+
+        FROM eventos e
+
+        LEFT JOIN organizadores o
+            ON o.id = e.organizador_id
+
+        LEFT JOIN inscripciones i
+            ON i.evento_id = e.id
+
+        WHERE e.activo = 1
+        AND e.publicado = 1
+        AND e.fecha >= CURDATE()
+        
+
+        GROUP BY
+            e.id,
+            e.nombre,
+            e.fecha,
+            o.nombre
+
+        ORDER BY total_inscriptos DESC
+    """)
+
+    resumen_eventos = cursor.fetchall()
 
     cursor.close()
     conn.close()
@@ -68,7 +123,8 @@ def admin():
         inscriptos_total=inscriptos_total,
         inscriptos_hoy=inscriptos_hoy,
         eventos=eventos,
-        organizadores=organizadores
+        organizadores=organizadores,
+        resumen_eventos=resumen_eventos
     )
 @admin_bp.route("/admin/login", methods=["GET", "POST"])
 def admin_login():

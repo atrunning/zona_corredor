@@ -46,7 +46,7 @@ def slugify(texto):
 
 app.register_blueprint(organizador_bp)
 app.register_blueprint(eventos_bp)
-print("🔥 VERSION NUEVA 1.6.6 🔥")
+print("🔥 VERSION NUEVA 1.6.7 🔥")
 
 def layout(contenido, menu=True, evento_id=None, eventos=None):
 
@@ -2736,7 +2736,7 @@ def inscribirse(evento_id):
                 <option value="F">Femenino</option>
 
             </select>
-
+            
             <script>
 
             document.getElementById("fecha_nacimiento2").addEventListener("change", function(){
@@ -2812,7 +2812,17 @@ def inscribirse(evento_id):
                 salida += f"<option value='{t['talle']}'>{t['talle']}</option>"
 
             salida += '</select>'
+        # 👕 Remera participante 2
+        if str(distancia.get("incluye_remera")) == "1" and participantes > 1:
 
+            salida += '<h3>Talle de remera participante 2</h3>'
+            salida += '<select name="talle_remera2" required style="padding:10px;border-radius:6px;">'
+            salida += '<option value="">Seleccionar</option>'
+
+            for t in talles:
+                salida += f"<option value='{t['talle']}'>{t['talle']}</option>"
+
+            salida += '</select>'
            
         # -------------------------
         # CAMPOS EXTRA
@@ -3130,6 +3140,7 @@ def inscribirse(evento_id):
         apellido2 = request.form.get("apellido2", "").strip()
         fecha_nacimiento2 = request.form.get("fecha_nacimiento2", "").strip()
         genero2 = request.form.get("genero2", "").strip().upper()
+        talle_remera2 = request.form.get("talle_remera2", "").strip()
 
         print("================================")
         print("DNI2:", dni2)
@@ -3171,6 +3182,7 @@ def inscribirse(evento_id):
             team_id = None
 
         talle_remera = request.form.get("talle_remera", "").strip() 
+        
 
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
@@ -3189,11 +3201,21 @@ def inscribirse(evento_id):
 
         if datos["incluye_remera"] == 0:
             talle_remera = None
+            talle_remera2 = None
 
         if datos["incluye_remera"] == 1 and not talle_remera:
             cursor.close()
             conn.close()
-            return "<h2>Debe seleccionar talle de remera.</h2>"      
+            return "<h2>Debe seleccionar talle de remera.</h2>"
+
+        if (
+            datos["incluye_remera"] == 1
+            and participantes >= 2
+            and not talle_remera2
+        ):
+            cursor.close()
+            conn.close()
+            return "<h2>Debe seleccionar el talle de remera del participante 2.</h2>"      
 
             
         if edad_ingresada:
@@ -3492,27 +3514,30 @@ def inscribirse(evento_id):
         conn.commit()
 
         inscripcion_id = cursor.lastrowid
-        # Vincular participantes a la inscripción
+        
+        # Vincular participante 1 a la inscripción
         cursor.execute("""
         INSERT INTO inscripcion_participantes
-        (inscripcion_id, persona_id, orden)
-        VALUES (%s,%s,%s)
+        (inscripcion_id, persona_id, orden, talle_remera)
+        VALUES (%s,%s,%s,%s)
         """, (
             inscripcion_id,
             persona_id,
-            1
+            1,
+            talle_remera
         ))
 
         if participantes > 1 and dni2:
 
             cursor.execute("""
             INSERT INTO inscripcion_participantes
-            (inscripcion_id, persona_id, orden)
-            VALUES (%s,%s,%s)
+            (inscripcion_id, persona_id, orden, talle_remera)
+            VALUES (%s,%s,%s,%s)
             """, (
                 inscripcion_id,
                 persona2_id,
-                2
+                2,
+                talle_remera2
             ))
 
         conn.commit()

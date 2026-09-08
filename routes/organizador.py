@@ -2694,6 +2694,28 @@ def editar_inscripcion(numero):
         distancia_anterior = ins["distancia_id"]
         estado_pago = ins["estado_pago"]
 
+        # -------------------------
+        # CARGAR PARTICIPANTES INSCRIPCIÓN
+        # -------------------------
+
+        cursor.execute("""
+        SELECT
+            ip.orden,
+            ip.persona_id,
+            ip.talle_remera,
+            p.nombre,
+            p.apellido,
+            p.dni,
+            p.fecha_nac,
+            p.genero
+        FROM inscripcion_participantes ip
+        JOIN personas p ON p.id = ip.persona_id
+        WHERE ip.inscripcion_id = %s
+        ORDER BY ip.orden
+        """, (inscripcion_id,))
+
+        participantes_inscripcion = cursor.fetchall()
+
         if not distancia_id:
             distancia_id = ins["distancia_id"]
         
@@ -2752,7 +2774,81 @@ def editar_inscripcion(numero):
             instagram,facebook,strava,fecha_nac,
             genero,team_id,numero
         ))
-       
+
+        # -------------------------
+        # GUARDAR PARTICIPANTES ADICIONALES
+        # -------------------------
+
+        for participante in participantes_inscripcion[1:]:
+
+            orden = participante["orden"]
+
+            persona_id = request.form.get(
+                f"participante_id_{orden}"
+            )
+
+            nombre_participante = request.form.get(
+                f"participante_nombre_{orden}", ""
+            ).strip().upper()
+
+            apellido_participante = request.form.get(
+                f"participante_apellido_{orden}", ""
+            ).strip().upper()
+
+            dni_participante = request.form.get(
+                f"participante_dni_{orden}", ""
+            ).strip()
+
+            genero_participante = request.form.get(
+                f"participante_genero_{orden}"
+            )
+
+            fecha_nac_participante = request.form.get(
+                f"participante_fecha_nac_{orden}"
+            ) or None
+
+            talle_participante = request.form.get(
+                f"participante_talle_remera_{orden}"
+            )
+
+        # -------------------------
+        # ACTUALIZAR DATOS PERSONALES
+        # -------------------------
+
+        if persona_id:
+
+            cursor.execute("""
+            UPDATE personas
+            SET nombre=%s,
+                apellido=%s,
+                dni=%s,
+                fecha_nac=%s,
+                genero=%s
+            WHERE id=%s
+            """, (
+                nombre_participante,
+                apellido_participante,
+                dni_participante,
+                fecha_nac_participante,
+                genero_participante,
+                persona_id
+            ))
+
+            # -------------------------
+            # ACTUALIZAR TALLE
+            # -------------------------
+
+            cursor.execute("""
+            UPDATE inscripcion_participantes
+            SET talle_remera=%s
+            WHERE inscripcion_id=%s
+            AND orden=%s
+            """, (
+                talle_participante,
+                inscripcion_id,
+                orden
+            ))
+
         # -------------------------
         # VALIDAR DORSAL REPETIDO
         # -------------------------
@@ -2904,6 +3000,28 @@ def editar_inscripcion(numero):
 
     
     inscripcion_id = ins["id"]
+
+    # -------------------------
+    # PARTICIPANTES INSCRIPCIÓN
+    # -------------------------
+
+    cursor.execute("""
+    SELECT
+        ip.orden,
+        ip.persona_id,
+        ip.talle_remera,
+        p.nombre,
+        p.apellido,
+        p.dni,
+        p.fecha_nac,
+        p.genero
+    FROM inscripcion_participantes ip
+    JOIN personas p ON p.id = ip.persona_id
+    WHERE ip.inscripcion_id = %s
+    ORDER BY ip.orden
+    """, (inscripcion_id,))
+
+    participantes_inscripcion = cursor.fetchall()
     
     if ins and ins.get("fecha_nac"):
         ins["fecha_nac"] = ins["fecha_nac"].strftime("%Y-%m-%d")
@@ -3092,6 +3210,80 @@ def editar_inscripcion(numero):
         {d['nombre']}
         </option>
         """
+    salida += """
+    </select>
+
+    """
+    salida += """
+        <br><br>
+
+        <button type="submit"
+            style="
+                background:#4CAF50;
+                color:white;
+                padding:12px 25px;
+                border:none;
+                border-radius:5px;
+                font-size:16px;
+                cursor:pointer;
+            ">
+            Guardar cambios
+        </button>
+
+
+    """
+    # -------------------------
+    # LISTA DE PARTICIPANTES
+    # -------------------------
+
+    html_participantes = ""
+
+    if participantes_inscripcion:
+
+        html_participantes += """
+        <hr>
+        <h3>Participantes de la inscripción</h3>
+        """
+
+        for participante in participantes_inscripcion:
+
+            fecha_participante = participante.get("fecha_nac")
+
+            if fecha_participante:
+                try:
+                    fecha_participante = fecha_participante.strftime("%d/%m/%Y")
+                except:
+                    pass
+
+            html_participantes += f"""
+            <div style="
+                border:1px solid #ccc;
+                padding:15px;
+                margin-bottom:10px;
+                border-radius:6px;
+                background:#f8f9fa;
+            ">
+
+                <h4 style="margin-top:0">
+                    Participante {participante['orden']}
+                </h4>
+
+                <b>Nombre:</b>
+                {participante['nombre']} {participante['apellido']}<br>
+
+                <b>DNI:</b>
+                {participante['dni']}<br>
+
+                <b>Género:</b>
+                {participante.get('genero') or '-'}<br>
+
+                <b>Fecha nacimiento:</b>
+                {fecha_participante or '-'}<br>
+
+                <b>Talle remera:</b>
+                {participante.get('talle_remera') or '-'}
+            </div>
+            """
 
     # 🔥 TODO ESTO JUNTO
     salida += f"""
@@ -3106,6 +3298,8 @@ def editar_inscripcion(numero):
     Fecha inscripción: {ins['fecha_inscripcion']}<br>
     Estado pago: {ins['estado_pago']}<br>
     Team: {ins.get('team','-')}<br>
+
+    {html_participantes}
     
 
     </div>
@@ -3119,44 +3313,114 @@ def editar_inscripcion(numero):
 
     <h2>Datos del corredor</h2>
 
-    Nombre<br>
-    <input type="text" name="nombre" value="{ins['nombre']}"><br><br>
+    <div style="
+        display:flex;
+        gap:15px;
+        align-items:flex-end;
+        flex-wrap:wrap;
+        margin-bottom:20px;
+    ">
 
-    Apellido<br>
-    <input type="text" name="apellido" value="{ins['apellido']}"><br><br>
+        <div>
+            Nombre<br>
+            <input
+                type="text"
+                name="nombre"
+                value="{ins['nombre']}"
+                style="width:180px"
+            >
+        </div>
 
-    DNI<br>
-    <input type="text" name="dni" value="{ins['dni']}"><br><br>
+        <div>
+            Apellido<br>
+            <input
+                type="text"
+                name="apellido"
+                value="{ins['apellido']}"
+                style="width:180px"
+            >
+        </div>
 
-    Email<br>
-    <input type="email" name="email" value="{ins['email']}"><br><br>
+        <div>
+            Sexo<br>
+            <select name="genero" style="width:140px">
+                <option value="">Seleccione...</option>
+                <option value="M" {"selected" if ins.get("genero")=="M" else ""}>Masculino</option>
+                <option value="F" {"selected" if ins.get("genero")=="F" else ""}>Femenino</option>
+                <option value="X" {"selected" if ins.get("genero")=="X" else ""}>Otro</option>
+            </select>
+        </div>
 
-    Celular<br>
-    <input type="text" name="celular" value="{ins.get('celular','')}"><br><br>
+        <div>
+            Edad<br>
+            <input
+                type="text"
+                id="edad"
+                readonly
+                style="background:#eee;width:70px"
+            >
+        </div>
 
-    Ciudad<br>
-    <input type="text" name="ciudad" value="{ins.get('ciudad','')}"><br><br>
+    </div>
+   
+    <div style="
+        display:flex;
+        gap:15px;
+        align-items:flex-end;
+        flex-wrap:wrap;
+        margin-bottom:20px;
+    ">
 
-    Fecha nacimiento<br>
-    <input type="date" name="fecha_nac" value="{ins.get('fecha_nac','')}"><br><br>
+        <div>
+            DNI<br>
+            <input
+                type="text"
+                name="dni"
+                value="{ins['dni']}"
+                style="width:140px"
+            >
+        </div>
 
-        Fecha nacimiento<br>
-    <input type="date" name="fecha_nac" value="{ins.get('fecha_nac','')}"><br><br>
+        <div>
+            Fecha nacimiento<br>
+            <input
+                type="date"
+                name="fecha_nac"
+                value="{ins.get('fecha_nac','')}"
+            >
+        </div>
 
-    Género<br>
-    <select name="genero">
-        <option value="">Seleccione...</option>
-        <option value="M" {"selected" if ins.get("genero")=="M" else ""}>Masculino</option>
-        <option value="F" {"selected" if ins.get("genero")=="F" else ""}>Femenino</option>
-        <option value="X" {"selected" if ins.get("genero")=="X" else ""}>Otro</option>
-    </select><br><br>
+        <div>
+            Email<br>
+            <input
+                type="email"
+                name="email"
+                value="{ins['email']}"
+                style="width:230px"
+            >
+        </div>
 
-    Edad<br>
-    <input type="text" id="edad" readonly style="background:#eee"><br><br>
+        <div>
+            Celular<br>
+            <input
+                type="text"
+                name="celular"
+                value="{ins.get('celular','')}"
+                style="width:150px"
+            >
+        </div>
 
-    Edad<br>
-    <input type="text" id="edad" readonly style="background:#eee"><br><br>
+        <div>
+            Ciudad<br>
+            <input
+                type="text"
+                name="ciudad"
+                value="{ins.get('ciudad','')}"
+                style="width:180px"
+            >
+        </div>
 
+    </div>
     Instagram<br>
     <input type="text" name="instagram" value="{ins.get('instagram','')}"><br><br>
 
@@ -3246,9 +3510,158 @@ def editar_inscripcion(numero):
 
     <div id="lista_teams" style="border:1px solid #ccc;max-height:120px;overflow:auto"></div>
 
-    </div>
     """
-    
+    # -------------------------
+    # PARTICIPANTES DE LA INSCRIPCIÓN
+    # -------------------------
+
+    if len(participantes_inscripcion) > 1:
+
+        salida += """
+        <hr>
+
+        <h2>Participantes adicionales de la inscripción</h2>
+        """
+
+        # Arrancamos desde el segundo participante.
+        # El primero ya aparece arriba como "Datos del corredor".
+        for participante in participantes_inscripcion[1:]:
+
+            fecha_nac_obj = participante.get("fecha_nac")
+            edad = ""
+
+            if fecha_nac_obj:
+                from datetime import date
+
+                hoy = date.today()
+
+                edad = hoy.year - fecha_nac_obj.year - (
+                    (hoy.month, hoy.day) <
+                    (fecha_nac_obj.month, fecha_nac_obj.day)
+                )
+
+                fecha_nac = fecha_nac_obj.strftime("%Y-%m-%d")
+            else:
+                fecha_nac = ""
+
+            salida += f"""
+            <div style="
+                border:1px solid #ccc;
+                border-radius:8px;
+                padding:15px;
+                margin-bottom:15px;
+            ">
+
+                <h3>Participante {participante['orden']}</h3>
+
+                <input type="hidden"
+                    name="participante_id_{participante['orden']}"
+                    value="{participante.get('persona_id', '')}">
+
+                <div style="
+                    display:flex;
+                    gap:15px;
+                    flex-wrap:wrap;
+                    align-items:flex-end;
+                ">
+
+                    <div>
+                        Nombre<br>
+                        <input type="text"
+                            name="participante_nombre_{participante['orden']}"
+                            value="{participante.get('nombre', '')}">
+                    </div>
+
+                    <div>
+                        Apellido<br>
+                        <input type="text"
+                            name="participante_apellido_{participante['orden']}"
+                            value="{participante.get('apellido', '')}">
+                    </div>
+
+                    <div>
+                        DNI<br>
+                        <input type="text"
+                            name="participante_dni_{participante['orden']}"
+                            value="{participante.get('dni', '')}">
+                    </div>
+
+                    <div>
+                        Género<br>
+                        <select name="participante_genero_{participante['orden']}">
+
+                            <option value="">Seleccionar</option>
+
+                            <option value="M"
+                            {"selected" if participante.get("genero") == "M" else ""}>
+                            Masculino
+                            </option>
+
+                            <option value="F"
+                            {"selected" if participante.get("genero") == "F" else ""}>
+                            Femenino
+                            </option>
+
+                        </select>
+                    </div>
+
+                    <div>
+                        Fecha nacimiento<br>
+                        <input type="date"
+                            name="participante_fecha_nac_{participante['orden']}"
+                            value="{fecha_nac}">
+                    </div>
+
+                    <div>
+                        Edad<br>
+                        <input type="number"
+                            name="participante_edad_{participante['orden']}"
+                            value="{edad}"
+                            style="width:70px;">
+                    </div>
+
+                <div>
+                    Talle remera<br>
+
+                    <select name="participante_talle_remera_{participante['orden']}">
+
+                        <option value="">Seleccionar</option>
+
+                        <option value="XS"
+                        {"selected" if participante.get("talle_remera") == "XS" else ""}>
+                        XS
+                        </option>
+
+                        ...
+                    </select>
+                </div>    
+
+                    </div>
+
+                </div>
+
+            </div>
+            """
+
+    salida += """
+        <div style="margin-top:20px; margin-bottom:20px;">
+            <button type="submit"
+                style="
+                    background:#4CAF50;
+                    color:white;
+                    padding:12px 25px;
+                    border:none;
+                    border-radius:5px;
+                    font-size:16px;
+                    cursor:pointer;
+                ">
+                Guardar cambios
+            </button>
+        </div>
+    """
+
+               
+       
 
     # ------------------- PAGOS -------------------
     salida += f"""
@@ -3349,10 +3762,7 @@ def editar_inscripcion(numero):
 
     <br><br>
 
-    <button type="submit">
-    Guardar cambios
-    </button>
-
+    
     </form>
     """
 
@@ -3457,6 +3867,7 @@ def editar_inscripcion(numero):
     </script>
     """
 
+    
     return layout(salida)
 
     
@@ -4642,6 +5053,7 @@ def exportar_excel(evento_id):
     query = """
     SELECT
         i.id,
+        ip.orden AS orden_participante,
         e.nombre AS evento,
         i.numero_inscripcion,
         p.nombre,
@@ -4665,7 +5077,11 @@ def exportar_excel(evento_id):
         i.talle_remera,
         t.nombre AS team
     FROM inscripciones i
-    JOIN personas p ON p.id = i.persona_id
+    JOIN inscripcion_participantes ip
+        ON ip.inscripcion_id = i.id
+
+    JOIN personas p
+        ON p.id = ip.persona_id
     JOIN distancias d ON d.id = i.distancia_id
     LEFT JOIN teams t ON t.id = p.team_id
     LEFT JOIN provincias prov ON prov.id = p.provincia_id

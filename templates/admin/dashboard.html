@@ -67,7 +67,49 @@
             </div>
         
         </div>
-
+        <div class="resumen-eventos">
+        
+            <h2>🏃 Resumen de inscripciones por evento</h2>
+        
+            <div class="tabla-contenedor">
+        
+                <table>
+        
+                    <thead>
+                        <tr>
+                            <th>Evento</th>
+                            <th>Fecha</th>
+                            <th>Organizador</th>
+                            <th>Inscriptos</th>
+                            <th>Pagados</th>
+                            <th>Pendientes</th>
+                            <th>Vencidos</th>
+                        </tr>
+                    </thead>
+        
+                    <tbody>
+        
+                        {% for evento in resumen_eventos %}
+        
+                        <tr>
+                            <td>{{ evento.nombre }}</td>
+                            <td>{{ evento.fecha }}</td>
+                            <td>{{ evento.organizador }}</td>
+                            <td><strong>{{ evento.total_inscriptos }}</strong></td>
+                            <td>{{ evento.pagados }}</td>
+                            <td>{{ evento.pendientes }}</td>
+                            <td>{{ evento.vencidos }}</td>
+                        </tr>
+        
+                        {% endfor %}
+        
+                    </tbody>
+        
+                </table>
+        
+            </div>
+        
+        </div>
     </div>
 
 </body>
