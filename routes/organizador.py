@@ -2811,43 +2811,43 @@ def editar_inscripcion(numero):
                 f"participante_talle_remera_{orden}"
             )
 
-        # -------------------------
-        # ACTUALIZAR DATOS PERSONALES
-        # -------------------------
-
-        if persona_id:
-
-            cursor.execute("""
-            UPDATE personas
-            SET nombre=%s,
-                apellido=%s,
-                dni=%s,
-                fecha_nac=%s,
-                genero=%s
-            WHERE id=%s
-            """, (
-                nombre_participante,
-                apellido_participante,
-                dni_participante,
-                fecha_nac_participante,
-                genero_participante,
-                persona_id
-            ))
-
             # -------------------------
-            # ACTUALIZAR TALLE
+            # ACTUALIZAR DATOS PERSONALES
             # -------------------------
 
-            cursor.execute("""
-            UPDATE inscripcion_participantes
-            SET talle_remera=%s
-            WHERE inscripcion_id=%s
-            AND orden=%s
-            """, (
-                talle_participante,
-                inscripcion_id,
-                orden
-            ))
+            if persona_id:
+
+                cursor.execute("""
+                UPDATE personas
+                SET nombre=%s,
+                    apellido=%s,
+                    dni=%s,
+                    fecha_nac=%s,
+                    genero=%s
+                WHERE id=%s
+                """, (
+                    nombre_participante,
+                    apellido_participante,
+                    dni_participante,
+                    fecha_nac_participante,
+                    genero_participante,
+                    persona_id
+                ))
+
+                # -------------------------
+                # ACTUALIZAR TALLE
+                # -------------------------
+
+                cursor.execute("""
+                UPDATE inscripcion_participantes
+                SET talle_remera=%s
+                WHERE inscripcion_id=%s
+                AND orden=%s
+                """, (
+                    talle_participante,
+                    inscripcion_id,
+                    orden
+                ))
 
         # -------------------------
         # VALIDAR DORSAL REPETIDO
