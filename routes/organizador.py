@@ -5080,11 +5080,11 @@ def exportar_excel(evento_id):
         i.talle_remera,
         t.nombre AS team
     FROM inscripciones i
-    JOIN inscripcion_participantes ip
+    LEFT JOIN inscripcion_participantes ip
         ON ip.inscripcion_id = i.id
 
     JOIN personas p
-        ON p.id = ip.persona_id
+        ON p.id = COALESCE(ip.persona_id, i.persona_id)
     JOIN distancias d ON d.id = i.distancia_id
     LEFT JOIN teams t ON t.id = p.team_id
     LEFT JOIN provincias prov ON prov.id = p.provincia_id
@@ -5218,7 +5218,13 @@ def exportar_excel(evento_id):
             edad = hoy.year - fn.year - ((hoy.month, hoy.day) < (fn.month, fn.day))
 
         # estado
-        estado_txt = "Pagado" if d["estado_pago"] in ["pagado","aprobado"] else "Pendiente"
+        if d["estado_pago"] in ["pagado", "aprobado"]:
+            estado_txt = "Pagado"
+        elif d["estado_pago"] == "bonificado":
+            estado_txt = "Bonificado"
+        else:
+            estado_txt = "Pendiente"
+        
 
         # respuestas campos extra
 
