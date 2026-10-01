@@ -4603,6 +4603,7 @@ def pantalla_exportar(evento_id):
         <option value="pagado">Pagados</option>
         <option value="bonificado">Bonificados</option>
         <option value="pendiente">Pendientes</option>
+        <option value="vencido">Vencidos</option>
     </select><br><br>
 
     Distancia:<br>
@@ -5222,6 +5223,8 @@ def exportar_excel(evento_id):
             estado_txt = "Pagado"
         elif d["estado_pago"] == "bonificado":
             estado_txt = "Bonificado"
+        elif d["estado_pago"] == "vencido":
+            estado_txt = "Vencido"
         else:
             estado_txt = "Pendiente"
         
