@@ -5051,15 +5051,31 @@ def exportar_excel(evento_id):
 
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
-    cursor.execute("SELECT nombre FROM eventos WHERE id = %s", (evento_id,))
+
+    # =========================
+    # NOMBRE DEL EVENTO
+    # =========================
+
+    cursor.execute(
+        "SELECT nombre FROM eventos WHERE id = %s",
+        (evento_id,)
+    )
+
     evento = cursor.fetchone()
     nombre_evento = evento["nombre"]
+
+    # =========================
+    # DATOS
+    # =========================
+
     query = """
     SELECT
         i.id,
         ip.orden AS orden_participante,
+
         e.nombre AS evento,
         i.numero_inscripcion,
+
         p.nombre,
         p.apellido,
         p.dni,
@@ -5067,114 +5083,193 @@ def exportar_excel(evento_id):
         p.celular,
         p.fecha_nac,
         p.genero,
+
         c.nombre AS categoria,
+
         p.ciudad,
         p.direccion,
+
         pa.nombre AS pais,
         prov.nombre AS provincia,
-        d.nombre AS distancia,        
+
+        d.nombre AS distancia,
+
         i.estado_pago,
+
         pay.monto_total AS monto_pagado,
         pay.fecha_pago,
-        i.fecha_inscripcion,        
+
+        i.fecha_inscripcion,
         i.dorsal,
+
         i.talle_remera,
+
+        ip.talle_remera AS talle_remera_participante,
+
         t.nombre AS team
+
     FROM inscripciones i
+
     LEFT JOIN inscripcion_participantes ip
         ON ip.inscripcion_id = i.id
 
     JOIN personas p
         ON p.id = COALESCE(ip.persona_id, i.persona_id)
-    JOIN distancias d ON d.id = i.distancia_id
-    LEFT JOIN teams t ON t.id = p.team_id
-    LEFT JOIN provincias prov ON prov.id = p.provincia_id
-    LEFT JOIN paises pa ON pa.id = p.pais_id
-    LEFT JOIN categorias c ON c.id = i.categoria_id
+
+    JOIN distancias d
+        ON d.id = i.distancia_id
+
+    LEFT JOIN teams t
+        ON t.id = p.team_id
+
+    LEFT JOIN provincias prov
+        ON prov.id = p.provincia_id
+
+    LEFT JOIN paises pa
+        ON pa.id = p.pais_id
+
+    LEFT JOIN categorias c
+        ON c.id = i.categoria_id
+
     LEFT JOIN (
-        SELECT 
+        SELECT
             inscripcion_id,
             SUM(monto) AS monto_total,
             MAX(fecha_confirmacion) AS fecha_pago
         FROM pagos
         WHERE estado IN ('pagado','aprobado')
         GROUP BY inscripcion_id
-    ) pay ON pay.inscripcion_id = i.id
-    JOIN eventos e ON e.id = i.evento_id
+    ) pay
+        ON pay.inscripcion_id = i.id
+
+    JOIN eventos e
+        ON e.id = i.evento_id
+
     WHERE i.evento_id = %s
     """
 
     params = [evento_id]
 
-    # filtro estado
+    # =========================
+    # FILTRO ESTADO
+    # =========================
+
     if estado:
+
         if estado == "pagado":
-            query += " AND i.estado_pago = 'pagado'"
+
+            query += """
+                AND i.estado_pago = 'pagado'
+            """
+
         else:
-            query += " AND i.estado_pago = %s"
+
+            query += """
+                AND i.estado_pago = %s
+            """
+
             params.append(estado)
 
-    # filtro distancia
+    # =========================
+    # FILTRO DISTANCIA
+    # =========================
+
     if distancia:
-        query += " AND i.distancia_id = %s"
+
+        query += """
+            AND i.distancia_id = %s
+        """
+
         params.append(distancia)
 
     cursor.execute(query, params)
+
     datos = cursor.fetchall()
 
-    # -------------------------
+    # =========================
     # CAMPOS EXTRA
-    # -------------------------
+    # =========================
 
     cursor.execute("""
-    SELECT dc.id, dc.nombre
-    FROM distancia_campos dc
-    JOIN distancias d
-        ON d.id = dc.distancia_id
-    WHERE d.evento_id = %s
-    ORDER BY dc.id
+        SELECT
+            dc.id,
+            dc.nombre
+        FROM distancia_campos dc
+
+        JOIN distancias d
+            ON d.id = dc.distancia_id
+
+        WHERE d.evento_id = %s
+
+        ORDER BY dc.id
     """, (evento_id,))
 
-    
-
     campos_extra = cursor.fetchall()
+
     usar_campos_extra = len(campos_extra) > 0
 
-   
     cursor.close()
     conn.close()
-    
 
-# 🧾 CREAR EXCEL
+    # =========================
+    # CREAR EXCEL
+    # =========================
+
     wb = Workbook()
+
     ws = wb.active
     ws.title = "Participantes"
 
-    # encabezados
+    # =========================
+    # ENCABEZADOS
+    # =========================
+
     headers = [
+
         "Evento",
         "Código",
-        "Nombre",
-        "Apellido",
-        "DNI",
-        "Email",
-        "celular",
-        "Fecha Nacimiento",
-        "Edad",
-        "Género",
-        "Categoría",
-        "Provincia",
-        "País",
-        "Ciudad",
-        "Dirección",
+
+        # CORREDOR 1
+        "C1 Nombre",
+        "C1 Apellido",
+        "C1 DNI",
+        "C1 Email",
+        "C1 Celular",
+        "C1 Fecha Nacimiento",
+        "C1 Edad",
+        "C1 Género",
+        "C1 Categoría",
+        "C1 Provincia",
+        "C1 País",
+        "C1 Ciudad",
+        "C1 Dirección",
+        "C1 Team",
+        "C1 Talle Remera",
+
+        # CORREDOR 2
+        "C2 Nombre",
+        "C2 Apellido",
+        "C2 DNI",
+        "C2 Email",
+        "C2 Celular",
+        "C2 Fecha Nacimiento",
+        "C2 Edad",
+        "C2 Género",
+        "C2 Categoría",
+        "C2 Provincia",
+        "C2 País",
+        "C2 Ciudad",
+        "C2 Dirección",
+        "C2 Team",
+        "C2 Talle Remera",
+
+        # DATOS DE LA INSCRIPCIÓN
         "Distancia",
         "Estado",
         "Monto Pagado",
         "Fecha Pago",
         "Fecha inscripción",
-        "Dorsal",
-        "Team",
-        "Talle Remera"
+        "Dorsal"
     ]
 
     for campo in campos_extra:
@@ -5182,11 +5277,28 @@ def exportar_excel(evento_id):
 
     ws.append(headers)
 
+    # =========================
+    # EDAD
+    # =========================
 
     from datetime import date
-    
 
-    # cargar todas las respuestas de una sola vez
+    def calcular_edad(fecha_nac):
+
+        if not fecha_nac:
+            return ""
+
+        hoy = date.today()
+
+        return hoy.year - fecha_nac.year - (
+            (hoy.month, hoy.day) <
+            (fecha_nac.month, fecha_nac.day)
+        )
+
+    # =========================
+    # CARGAR RESPUESTAS EXTRA
+    # =========================
+
     respuestas_por_inscripcion = {}
 
     if usar_campos_extra:
@@ -5195,8 +5307,11 @@ def exportar_excel(evento_id):
         cursor2 = conn2.cursor(dictionary=True)
 
         cursor2.execute("""
-        SELECT inscripcion_id, campo_id, valor
-        FROM inscripcion_respuestas
+            SELECT
+                inscripcion_id,
+                campo_id,
+                valor
+            FROM inscripcion_respuestas
         """)
 
         todas_respuestas = cursor2.fetchall()
@@ -5205,75 +5320,250 @@ def exportar_excel(evento_id):
         conn2.close()
 
         for r in todas_respuestas:
+
             respuestas_por_inscripcion.setdefault(
-                r["inscripcion_id"], {}
+                r["inscripcion_id"],
+                {}
             )[r["campo_id"]] = r["valor"]
+
+    # =========================
+    # AGRUPAR POR INSCRIPCIÓN
+    # =========================
+
+    inscripciones = {}
 
     for d in datos:
 
-        # calcular edad
-        edad = ""
-        if d["fecha_nac"]:
-            hoy = date.today()
-            fn = d["fecha_nac"]
-            edad = hoy.year - fn.year - ((hoy.month, hoy.day) < (fn.month, fn.day))
+        inscripcion_id = d["id"]
 
-        # estado
-        if d["estado_pago"] in ["pagado", "aprobado"]:
-            estado_txt = "Pagado"
-        elif d["estado_pago"] == "bonificado":
-            estado_txt = "Bonificado"
-        elif d["estado_pago"] == "vencido":
-            estado_txt = "Vencido"
+        if inscripcion_id not in inscripciones:
+
+            inscripciones[inscripcion_id] = {
+                "participante1": None,
+                "participante2": None,
+                "base": d
+            }
+
+        orden = d["orden_participante"]
+
+        if orden == 1:
+
+            inscripciones[inscripcion_id]["participante1"] = d
+
+        elif orden == 2:
+
+            inscripciones[inscripcion_id]["participante2"] = d
+
         else:
-            estado_txt = "Pendiente"
-        
 
-        # respuestas campos extra
+            # Inscripciones antiguas que no tienen
+            # registro en inscripcion_participantes
+
+            if inscripciones[inscripcion_id]["participante1"] is None:
+
+                inscripciones[inscripcion_id]["participante1"] = d
+
+    # =========================
+    # ARMAR FILAS
+    # =========================
+
+    for inscripcion_id, info in inscripciones.items():
+
+        d1 = info["participante1"]
+        d2 = info["participante2"]
+
+        if not d1:
+            d1 = info["base"]
+
+        # =========================
+        # ESTADO
+        # =========================
+
+        if d1["estado_pago"] in ["pagado", "aprobado"]:
+
+            estado_txt = "Pagado"
+
+        elif d1["estado_pago"] == "bonificado":
+
+            estado_txt = "Bonificado"
+
+        elif d1["estado_pago"] == "vencido":
+
+            estado_txt = "Vencido"
+
+        else:
+
+            estado_txt = "Pendiente"
+
+        # =========================
+        # DATOS CORREDOR 1
+        # =========================
+
+        edad1 = calcular_edad(
+            d1["fecha_nac"]
+        )
+
+        talle1 = (
+            d1["talle_remera_participante"]
+            or d1["talle_remera"]
+            or ""
+        )
+
+        # =========================
+        # DATOS CORREDOR 2
+        # =========================
+
+        if d2:
+
+            edad2 = calcular_edad(
+                d2["fecha_nac"]
+            )
+
+            talle2 = (
+                d2["talle_remera_participante"]
+                or d2["talle_remera"]
+                or ""
+            )
+
+        else:
+
+            edad2 = ""
+            talle2 = ""
+
+        # =========================
+        # RESPUESTAS EXTRA
+        # =========================
 
         resp_dict = respuestas_por_inscripcion.get(
-            d["id"],
+            inscripcion_id,
             {}
         )
 
+        # =========================
+        # UNA SOLA FILA
+        # =========================
+
         fila = [
-            d["evento"],
-            d["numero_inscripcion"],
-            d["nombre"],
-            d["apellido"],
-            int(d["dni"]) if d["dni"] else "",
-            d["email"],
-            d["celular"],
-            d["fecha_nac"].strftime("%d/%m/%Y") if d["fecha_nac"] else "",
-            edad,
-            d["genero"] or "",
-            d["categoria"] or "",
-            d["provincia"] or "",
-            d["pais"] or "",
-            d["ciudad"] or "",
-            d["direccion"] or "",
-            d["distancia"],
+
+            # =====================
+            # DATOS GENERALES
+            # =====================
+
+            d1["evento"],
+            d1["numero_inscripcion"],
+
+            # =====================
+            # CORREDOR 1
+            # =====================
+
+            d1["nombre"] or "",
+            d1["apellido"] or "",
+            int(d1["dni"]) if d1["dni"] else "",
+            d1["email"] or "",
+            d1["celular"] or "",
+
+            d1["fecha_nac"].strftime("%d/%m/%Y")
+                if d1["fecha_nac"] else "",
+
+            edad1,
+
+            d1["genero"] or "",
+            d1["categoria"] or "",
+            d1["provincia"] or "",
+            d1["pais"] or "",
+            d1["ciudad"] or "",
+            d1["direccion"] or "",
+            d1["team"] or "",
+            talle1,
+
+            # =====================
+            # CORREDOR 2
+            # =====================
+
+            d2["nombre"] if d2 else "",
+            d2["apellido"] if d2 else "",
+            int(d2["dni"]) if d2 and d2["dni"] else "",
+            d2["email"] if d2 else "",
+            d2["celular"] if d2 else "",
+
+            (
+                d2["fecha_nac"].strftime("%d/%m/%Y")
+                if d2 and d2["fecha_nac"]
+                else ""
+            ),
+
+            edad2,
+
+            d2["genero"] if d2 else "",
+            d2["categoria"] if d2 else "",
+            d2["provincia"] if d2 else "",
+            d2["pais"] if d2 else "",
+            d2["ciudad"] if d2 else "",
+            d2["direccion"] if d2 else "",
+            d2["team"] if d2 else "",
+            talle2,
+
+            # =====================
+            # DATOS INSCRIPCIÓN
+            # =====================
+
+            d1["distancia"],
             estado_txt,
-            d["monto_pagado"] or "",  # 💰 NUEVO
-            d["fecha_pago"].strftime("%d/%m/%Y %H:%M") if d["fecha_pago"] else "",
-            d["fecha_inscripcion"].strftime("%d/%m/%Y %H:%M") if d["fecha_inscripcion"] else "",
-            d["dorsal"] or "",
-            d["team"] or "",
-            d["talle_remera"] or ""
-]
+
+            d1["monto_pagado"]
+                or "",
+
+            (
+                d1["fecha_pago"].strftime("%d/%m/%Y %H:%M")
+                if d1["fecha_pago"]
+                else ""
+            ),
+
+            (
+                d1["fecha_inscripcion"].strftime("%d/%m/%Y %H:%M")
+                if d1["fecha_inscripcion"]
+                else ""
+            ),
+
+            d1["dorsal"] or ""
+        ]
+
+        # =========================
+        # CAMPOS EXTRA
+        # =========================
 
         for campo in campos_extra:
+
             fila.append(
-                resp_dict.get(campo["id"], "")
+                resp_dict.get(
+                    campo["id"],
+                    ""
+                )
             )
 
+        # =========================
+        # AGREGAR FILA
+        # =========================
+
         ws.append(fila)
-    # guardar en memoria
+
+    # =========================
+    # GUARDAR EN MEMORIA
+    # =========================
+
     output = io.BytesIO()
+
     wb.save(output)
+
     output.seek(0)
+
     import re
-    nombre_limpio = re.sub(r'[^a-zA-Z0-9]+', '_', nombre_evento).lower()
+
+    nombre_limpio = re.sub(
+        r'[^a-zA-Z0-9]+',
+        '_',
+        nombre_evento
+    ).lower()
 
     return send_file(
         output,
