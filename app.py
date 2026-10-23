@@ -46,7 +46,7 @@ def slugify(texto):
 
 app.register_blueprint(organizador_bp)
 app.register_blueprint(eventos_bp)
-print("🔥 VERSION NUEVA 1.6.9 🔥")
+print("🔥 VERSION NUEVA 1.6.10 🔥")
 
 def layout(contenido, menu=True, evento_id=None, eventos=None):
 
@@ -807,7 +807,7 @@ def pagar_mp(numero):
     precio = round(precio, 2)
 
     # 💰 comisión 3%
-    comision = round(precio * 0.03, 2)
+    comision = round(precio * 0.035, 2)
 
     # 💳 total final
     precio_final = round(precio + comision, 2)
