@@ -578,12 +578,29 @@ def ver_inscriptos(evento_id):
     <script>
 
     let temporizadorBusqueda;
+    const claveEstadoBusqueda = "organizador_busqueda_activa";
+
+    // Al aplicar el filtro se recarga la página. Recuperamos el foco y el cursor
+    // para que el organizador pueda seguir escribiendo el DNI sin volver al campo.
+    const estadoBusqueda = sessionStorage.getItem(claveEstadoBusqueda);
+    if (estadoBusqueda) {
+        sessionStorage.removeItem(claveEstadoBusqueda);
+        try {
+            const posicion = JSON.parse(estadoBusqueda);
+            const campoBusqueda = document.getElementById("buscar");
+            campoBusqueda.focus();
+            campoBusqueda.setSelectionRange(posicion, posicion);
+        } catch (error) {
+            // Si el estado guardado no es válido, la búsqueda sigue funcionando.
+        }
+    }
 
     document.getElementById("buscar").addEventListener("input", function() {
 
         clearTimeout(temporizadorBusqueda);
 
         let texto = this.value.trim();
+        let posicion = this.selectionStart;
 
         temporizadorBusqueda = setTimeout(function() {
 
@@ -596,10 +613,11 @@ def ver_inscriptos(evento_id):
             }
 
             url.searchParams.set("pagina", "1");
+            sessionStorage.setItem(claveEstadoBusqueda, JSON.stringify(posicion));
 
             window.location.href = url.toString();
 
-        }, 500);
+        }, 800);
 
     });
 
