@@ -9,7 +9,6 @@ from openpyxl import Workbook
 import io
 from flask import session, redirect
 from datetime import datetime
-from storage import upload_dir
 organizador_bp = Blueprint("organizador", __name__)
 
 
@@ -1986,24 +1985,30 @@ def nuevo_evento():
     reglamento_archivo = None
     deslinde_archivo = None
 
-    carpeta_docs = upload_dir("documentos")
+    carpeta_docs = "static/documentos"
+
+    if not os.path.exists(carpeta_docs):
+        os.makedirs(carpeta_docs)
 
     doc1 = request.files.get("reglamento_archivo")
     if doc1 and doc1.filename != "":
         reglamento_archivo = secure_filename(doc1.filename)
-        doc1.save(carpeta_docs / reglamento_archivo)
+        doc1.save(os.path.join(carpeta_docs, reglamento_archivo))
 
     doc2 = request.files.get("deslinde_archivo")
     if doc2 and doc2.filename != "":
         deslinde_archivo = secure_filename(doc2.filename)
-        doc2.save(carpeta_docs / deslinde_archivo)
+        doc2.save(os.path.join(carpeta_docs, deslinde_archivo))
 
     if archivo and archivo.filename != "":
         imagen = secure_filename(archivo.filename)
 
-        carpeta = upload_dir("eventos")
+        carpeta = "data/eventos"
 
-        ruta = carpeta / imagen
+        if not os.path.exists(carpeta):
+            os.makedirs(carpeta)
+
+        ruta = os.path.join(carpeta, imagen)
 
         img = Image.open(archivo)
         img.thumbnail((1200,600))
@@ -4114,11 +4119,13 @@ def editar_evento(evento_id):
         # -------------------------
         # DOCUMENTOS
         # -------------------------
-        carpeta_docs = upload_dir("documentos")
+        carpeta_docs = "static/documentos"
+        if not os.path.exists(carpeta_docs):
+            os.makedirs(carpeta_docs)
 
         if archivo_reglamento and archivo_reglamento.filename != "":
             nombre_reglamento = secure_filename(archivo_reglamento.filename)
-            ruta = carpeta_docs / nombre_reglamento
+            ruta = os.path.join(carpeta_docs, nombre_reglamento)
             archivo_reglamento.save(ruta)
 
             reglamento = nombre_reglamento
@@ -4126,7 +4133,7 @@ def editar_evento(evento_id):
 
         if archivo_deslinde and archivo_deslinde.filename != "":
             nombre_deslinde = secure_filename(archivo_deslinde.filename)
-            ruta = carpeta_docs / nombre_deslinde
+            ruta = os.path.join(carpeta_docs, nombre_deslinde)
             archivo_deslinde.save(ruta)
 
             deslinde = nombre_deslinde
@@ -4138,9 +4145,10 @@ def editar_evento(evento_id):
         if archivo and archivo.filename and archivo.filename.strip() != "":
             nombre_archivo = secure_filename(archivo.filename)
 
-            carpeta = upload_dir("eventos")
+            carpeta = "data/eventos"
+            os.makedirs(carpeta, exist_ok=True)
 
-            ruta = carpeta / nombre_archivo
+            ruta = os.path.join(carpeta, nombre_archivo)
             archivo.save(ruta)
 
             imagen = nombre_archivo
@@ -4534,15 +4542,18 @@ def subir_imagen():
     extension = archivo.filename.rsplit(".", 1)[-1].lower()
     nombre = f"{int(time.time())}_{uuid.uuid4().hex[:6]}.{extension}"
 
-    carpeta = upload_dir("mapas")
+    carpeta = os.path.join("static", "mapas")
 
-    ruta = carpeta / nombre
+    if not os.path.exists(carpeta):
+        os.makedirs(carpeta)
+
+    ruta = os.path.join(carpeta, nombre)
 
     img = Image.open(archivo)
     img.thumbnail((1200,800))
     img.save(ruta)
 
-    url = f"/uploads/mapas/{nombre}"
+    url = f"/static/mapas/{nombre}"
 
     return jsonify({
         "url": url
@@ -4649,15 +4660,16 @@ def subir_imagen_simple():
     extension = archivo.filename.rsplit(".", 1)[-1].lower()
     nombre = f"{int(time.time())}_{uuid.uuid4().hex[:6]}.{extension}"
 
-    carpeta = upload_dir("mapas")
+    carpeta = os.path.join("static", "mapas")
+    os.makedirs(carpeta, exist_ok=True)
 
-    ruta = carpeta / nombre
+    ruta = os.path.join(carpeta, nombre)
 
     img = Image.open(archivo)
     img.thumbnail((1200,800))
     img.save(ruta)
 
-    url = f"/uploads/mapas/{nombre}"
+    url = f"/static/mapas/{nombre}"
 
     return jsonify({
         "url": url
