@@ -119,12 +119,14 @@ def ver_inscriptos(evento_id):
             OR LOWER(CONCAT(p.nombre, ' ', p.apellido)) LIKE %s
             OR p.dni LIKE %s
             OR LOWER(p.email) LIKE %s
+            OR CAST(i.numero_inscripcion AS CHAR) LIKE %s
         )
         """
 
         filtro = f"%{buscar.lower()}%"
 
         parametros.extend([
+            filtro,
             filtro,
             filtro,
             filtro,
@@ -157,12 +159,14 @@ def ver_inscriptos(evento_id):
             OR LOWER(CONCAT(p.nombre, ' ', p.apellido)) LIKE %s
             OR p.dni LIKE %s
             OR LOWER(p.email) LIKE %s
+            OR CAST(i.numero_inscripcion AS CHAR) LIKE %s
         )
         """
 
         filtro = f"%{buscar.lower()}%"
 
         parametros_total.extend([
+            filtro,
             filtro,
             filtro,
             filtro,
@@ -617,7 +621,7 @@ def ver_inscriptos(evento_id):
 
             window.location.href = url.toString();
 
-        }, 800);
+        }, 1200);
 
     });
 
