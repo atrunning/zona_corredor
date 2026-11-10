@@ -1,5 +1,6 @@
 from flask import Flask, request
 from db import get_db_connection
+from storage import upload_dir_candidates
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
@@ -260,13 +261,28 @@ def perfil():
     """
 @app.route("/evento_imagen/<nombre>")
 def evento_imagen(nombre):
-
-    ruta_nueva = os.path.join("data/eventos", nombre)
-
-    if os.path.exists(ruta_nueva):
-        return send_from_directory("data/eventos", nombre)
+    for carpeta in upload_dir_candidates("eventos"):
+        if (carpeta / nombre).is_file():
+            return send_from_directory(str(carpeta), nombre)
 
     return send_from_directory("static/eventos", nombre)
+
+
+@app.route("/uploads/<categoria>/<path:nombre>")
+def archivo_subido(categoria, nombre):
+    if categoria not in {"eventos", "documentos", "mapas"}:
+        return "Archivo no encontrado", 404
+
+    # Los nombres guardados en la base de datos y el contenido son archivos,
+    # nunca rutas con subdirectorios.
+    if os.path.basename(nombre) != nombre:
+        return "Archivo no encontrado", 404
+
+    for carpeta in upload_dir_candidates(categoria):
+        if (carpeta / nombre).is_file():
+            return send_from_directory(str(carpeta), nombre)
+
+    return "Archivo no encontrado", 404
 @app.route("/editar_perfil", methods=["GET","POST"])
 def editar_perfil():
 
@@ -705,7 +721,7 @@ def webhook_mp():
                 fecha_evento,
                 datos_mail["distancia"],
                 datos_mail["numero"],
-                f"{BASE_URL}/static/eventos/{imagen_evento}"
+                f"{BASE_URL}/evento_imagen/{imagen_evento}"
             )
 
     cursor.close()
@@ -1788,7 +1804,7 @@ def ver_evento(evento_id):
     flex-wrap:wrap;
     ">
 
-    <a href="/static/documentos/{evento['reglamento_archivo']}" target="_blank"
+    <a href="/uploads/documentos/{evento['reglamento_archivo']}" target="_blank"
     style="
     padding:10px 18px;
     background:#1565c0;
@@ -1826,7 +1842,7 @@ def ver_evento(evento_id):
 
     {boton_pagar}
 
-    <a href="/static/documentos/{evento['deslinde_archivo']}" target="_blank"
+    <a href="/uploads/documentos/{evento['deslinde_archivo']}" target="_blank"
     style="
     padding:10px 18px;
     background:#ef6c00;
@@ -3641,7 +3657,7 @@ def inscribirse(evento_id):
                             fecha_evento,
                             "Inscripción gratuita",
                             numero,
-                            f"{BASE_URL}/static/eventos/{imagen_evento}"
+                            f"{BASE_URL}/evento_imagen/{imagen_evento}"
                         )
 
                     except Exception as e:
