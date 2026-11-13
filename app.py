@@ -1702,6 +1702,7 @@ def ver_evento(evento_id):
         fecha_fin_inscripcion
     FROM distancias
     WHERE evento_id = %s
+    AND activo = 1
     """,(evento_id,))
     distancias = cursor.fetchall()
 
@@ -2440,12 +2441,17 @@ def inscribirse(evento_id):
     WHERE distancia_id=%s AND evento_id=%s) AS inscriptos
     FROM distancias
     WHERE id=%s
-    """, (distancia_id, evento_id, distancia_id))
+    AND evento_id=%s
+    AND activo=1
+    """, (distancia_id, evento_id, distancia_id, evento_id))
 
     datos = cursor.fetchone()
 
     cursor.close()
     conn.close()
+
+    if not datos:
+        return "Esta distancia no está disponible para inscripciones.", 404
 
     if datos["inscriptos"] >= datos["cupo"]:
         return f"""
@@ -2544,7 +2550,7 @@ def inscribirse(evento_id):
                 "ciudad": ""
             }
         cursor.execute(
-            "SELECT id, nombre FROM distancias WHERE evento_id = %s",
+            "SELECT id, nombre FROM distancias WHERE evento_id = %s AND activo = 1",
             (evento_id,)
         )
         distancias = cursor.fetchall()
@@ -2569,9 +2575,15 @@ def inscribirse(evento_id):
         FROM distancias
         WHERE id = %s
         AND evento_id = %s
+        AND activo = 1
         """, (distancia_id, evento_id))
 
         distancia = cursor.fetchone()
+
+        if not distancia:
+            cursor.close()
+            conn.close()
+            return "Esta distancia no está disponible para inscripciones.", 404
 
         participantes = distancia.get("participantes_por_inscripcion", 1)
         
@@ -2975,7 +2987,25 @@ def inscribirse(evento_id):
 
         if not distancia_id:
             return "Error: distancia perdida 😅"
-        
+
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        cursor.execute("""
+            SELECT id
+            FROM distancias
+            WHERE id = %s
+            AND evento_id = %s
+            AND activo = 1
+        """, (distancia_id, evento_id))
+
+        distancia_valida = cursor.fetchone()
+
+        if not distancia_valida:
+            cursor.close()
+            conn.close()
+            return "Esta distancia no está disponible para inscripciones.", 404
+                
         # ------------------------------------
         # VALIDAR CAMPOS OBLIGATORIOS
         # ------------------------------------
@@ -3025,8 +3055,7 @@ def inscribirse(evento_id):
         )
 
         # 🔥 traer limites de edad
-        conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+        
 
         cursor.execute("""
         SELECT edad_min, edad_max, validar_edad
@@ -3047,6 +3076,8 @@ def inscribirse(evento_id):
             edad_max = dist.get("edad_max")
 
             if edad_min is not None and edad < edad_min:
+                cursor.close()
+                conn.close()
                 return f"""
                 <div style="
                     max-width:420px;
@@ -3082,6 +3113,8 @@ def inscribirse(evento_id):
                 """
 
             if edad_max is not None and edad > edad_max:
+                cursor.close()
+                conn.close()
                 return f"""
                 <div style="
                     max-width:420px;
@@ -3184,9 +3217,7 @@ def inscribirse(evento_id):
         talle_remera = request.form.get("talle_remera", "").strip() 
         
 
-        conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
-
+       
         cursor.execute("""
         SELECT incluye_remera,
             participantes_por_inscripcion
