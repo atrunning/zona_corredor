@@ -1,5 +1,14 @@
 from flask import Flask, request
 from db import get_db_connection
+from stock_remeras import (
+    contar_seleccionados,
+    consultar_stock_talles,
+    estado_revision_pago,
+    obtener_talles_comprometidos,
+    obtener_talles_inscripcion,
+    reserva_requiere_reactivacion,
+    validar_stock_talles,
+)
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
@@ -599,9 +608,14 @@ def webhook_mp():
     cursor.execute("""
     SELECT
         i.id AS inscripcion_id,
+        i.evento_id,
+        i.estado_pago,
+        i.talle_remera,
+        d.incluye_remera,
         o.access_token_mp
     FROM inscripciones i
     JOIN eventos e ON e.id = i.evento_id
+    JOIN distancias d ON d.id = i.distancia_id
     JOIN organizadores o ON o.id = e.organizador_id
     WHERE i.id = %s
     LIMIT 1
@@ -662,13 +676,53 @@ def webhook_mp():
 
         conn.commit()
 
-        cursor.execute("""
-        UPDATE inscripciones
-        SET estado_pago = 'pagado'
-        WHERE id = %s
-        """, (inscripcion_id,))
+        reserva_confirmada = True
+        talles = []
+        if fila["incluye_remera"]:
+            talles = obtener_talles_inscripcion(cursor, inscripcion_id)
+            if talles:
+                reserva_confirmada, _motivo = validar_stock_talles(
+                    cursor,
+                    fila["evento_id"],
+                    talles,
+                    excluir_inscripcion_id=inscripcion_id,
+                    permitir_inactivos=contar_seleccionados(talles),
+                )
+            else:
+                reserva_confirmada = False
 
-        conn.commit()
+        cursor.execute("""
+            SELECT estado_pago
+            FROM inscripciones
+            WHERE id = %s
+            FOR UPDATE
+        """, (inscripcion_id,))
+        estado_actual = cursor.fetchone()["estado_pago"]
+
+        if estado_actual not in ("pagado", "aprobado", "bonificado", "gratis"):
+            if reserva_confirmada:
+                cursor.execute("""
+                    UPDATE inscripciones
+                    SET estado_pago = 'pagado'
+                    WHERE id = %s
+                """, (inscripcion_id,))
+            else:
+                # El cobro queda aprobado en pagos. La inscripción sigue
+                # vencida para que no consuma stock y aparezca en revisión.
+                cursor.execute("""
+                    UPDATE inscripciones
+                    SET estado_pago = 'vencido'
+                    WHERE id = %s
+                """, (inscripcion_id,))
+            conn.commit()
+        else:
+            reserva_confirmada = False
+
+        if not reserva_confirmada:
+            cursor.close()
+            conn.close()
+            return "ok", 200
+
         # -------------------------
         # ENVIAR MAIL CONFIRMACION
         # -------------------------
@@ -726,6 +780,17 @@ def pagar_mp(numero):
     SELECT
         i.id,
         i.numero_inscripcion,
+        i.estado_pago,
+        EXISTS (
+            SELECT 1 FROM pagos pay
+            WHERE pay.inscripcion_id = i.id
+              AND pay.estado IN ('aprobado', 'pagado')
+        ) AS pago_confirmado,
+        CASE
+            WHEN i.estado_pago = 'pendiente'
+             AND i.fecha_inscripcion < DATE_SUB(NOW(), INTERVAL 15 DAY)
+            THEN 1 ELSE 0
+        END AS reserva_vencida,
         i.cupon_id,
         d.precio,
         d.fecha_inicio_inscripcion,
@@ -760,6 +825,19 @@ def pagar_mp(numero):
     
     if not ins:
         return "Inscripción no encontrada"
+
+    if ins["pago_confirmado"]:
+        return "Pago aprobado. La inscripción requiere revisión manual y no admite un nuevo pago."
+
+    if ins["estado_pago"] in ("pagado", "aprobado", "bonificado", "gratis"):
+        return "Esta inscripción ya tiene el pago confirmado."
+
+    if ins["estado_pago"] == "vencido" or ins["reserva_vencida"]:
+        return f"""
+        <h2>La reserva de la inscripción venció.</h2>
+        <p>Reactivala y comprobá el stock antes de generar un nuevo pago.</p>
+        <a href="/reactivar_pago/{numero}">Revisar disponibilidad y reactivar</a>
+        """
 
     if not ins["access_token_mp"]:
         return "El organizador no tiene Mercado Pago conectado"
@@ -894,7 +972,12 @@ def pagar_evento(evento_id):
         i.estado_pago,
         d.nombre as distancia,
         d.precio,
-        i.id as inscripcion_id
+        i.id as inscripcion_id,
+        EXISTS (
+            SELECT 1 FROM pagos pay
+            WHERE pay.inscripcion_id = i.id
+              AND pay.estado IN ('aprobado', 'pagado')
+        ) AS pago_confirmado
     FROM inscripciones i
     JOIN personas p ON p.id = i.persona_id
     JOIN distancias d ON d.id = i.distancia_id
@@ -946,7 +1029,10 @@ def pagar_evento(evento_id):
         precio = float(i["precio"])
         nombre = i["nombre"] + " " + i["apellido"]
 
-        if precio == 0:
+        if i["pago_confirmado"]:
+            estado_texto = "⚠️ Pago aprobado - revisar inscripción antes de pagar nuevamente"
+            boton = ""
+        elif precio == 0:
             estado_texto = "💰 Inscripción gratuita ✅"
             boton = ""
         elif estado == "bonificado":
@@ -1082,6 +1168,16 @@ def reactivar_pago(numero):
     cursor.execute("""
     SELECT
         i.id,
+        i.evento_id,
+        i.estado_pago,
+        i.fecha_inscripcion,
+        i.talle_remera,
+        d.incluye_remera,
+        CASE
+            WHEN i.estado_pago = 'pendiente'
+             AND i.fecha_inscripcion < DATE_SUB(NOW(), INTERVAL 15 DAY)
+            THEN 1 ELSE 0
+        END AS reserva_vencida,
         d.fecha_inicio_inscripcion,
         d.fecha_fin_inscripcion
     FROM inscripciones i
@@ -1096,6 +1192,19 @@ def reactivar_pago(numero):
         cursor.close()
         conn.close()
         return "Inscripción no encontrada"
+
+    if ins["estado_pago"] in ("pagado", "aprobado", "bonificado", "gratis"):
+        cursor.close()
+        conn.close()
+        return "Esta inscripción ya tiene el pago confirmado."
+
+    reserva_vencida = reserva_requiere_reactivacion(
+        ins["estado_pago"], ins["reserva_vencida"]
+    )
+    if not reserva_vencida:
+        cursor.close()
+        conn.close()
+        return redirect(url_for("pagar_mp", numero=numero))
 
     ahora = date.today()
 
@@ -1125,13 +1234,95 @@ def reactivar_pago(numero):
         </div>
         """
 
+    if ins["incluye_remera"]:
+        talles = obtener_talles_inscripcion(cursor, ins["id"])
+        if talles:
+            disponible, _motivo = validar_stock_talles(
+                cursor,
+                ins["evento_id"],
+                talles,
+                excluir_inscripcion_id=ins["id"],
+                permitir_inactivos=contar_seleccionados(talles),
+            )
+        else:
+            disponible = False
+        if not disponible:
+            conn.rollback()
+            cursor.close()
+            conn.close()
+            return """
+            <h2>No hay stock disponible para reactivar esta inscripción.</h2>
+            <p>La inscripción y el pago no se modificaron.</p>
+            """
+
+    # Orden de bloqueo: stock, pago e inscripción. Los pagos manuales escriben
+    # primero pagos y después inscripciones; mantener ese orden reduce deadlocks.
+    cursor.execute("""
+        SELECT id
+        FROM pagos
+        WHERE inscripcion_id = %s
+          AND estado IN ('aprobado', 'pagado')
+        FOR UPDATE
+    """, (ins["id"],))
+    if cursor.fetchall():
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return "Pago aprobado. La inscripción requiere revisión manual y no admite un nuevo pago."
+
+    cursor.execute("""
+        SELECT estado_pago, fecha_inscripcion
+        FROM inscripciones
+        WHERE id = %s
+        FOR UPDATE
+    """, (ins["id"],))
+    estado_actual = cursor.fetchone()
+    if not estado_actual:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return "Inscripción no encontrada"
+
+    sigue_vencida = reserva_requiere_reactivacion(
+        estado_actual["estado_pago"]
+    )
+    if estado_actual["estado_pago"] == "pendiente":
+        cursor.execute("""
+            SELECT CASE
+                WHEN fecha_inscripcion < DATE_SUB(NOW(), INTERVAL 15 DAY)
+                THEN 1 ELSE 0
+            END AS vencida
+            FROM inscripciones
+            WHERE id = %s
+        """, (ins["id"],))
+        sigue_vencida = reserva_requiere_reactivacion(
+            estado_actual["estado_pago"], cursor.fetchone()["vencida"]
+        )
+    if not sigue_vencida:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return redirect(url_for("pagar_mp", numero=numero))
+
     cursor.execute("""
     UPDATE inscripciones
     SET estado_pago='pendiente',
         fecha_inscripcion=NOW()
-    WHERE numero_inscripcion=%s
-    AND estado_pago='vencido'
-    """, (numero,))
+    WHERE id=%s
+      AND (
+          estado_pago='vencido'
+          OR (
+              estado_pago='pendiente'
+              AND fecha_inscripcion < DATE_SUB(NOW(), INTERVAL 15 DAY)
+          )
+      )
+    """, (ins["id"],))
+
+    if cursor.rowcount != 1:
+        conn.rollback()
+        cursor.close()
+        conn.close()
+        return "La reserva cambió mientras se verificaba. Volvé a intentar."
 
     conn.commit()
 
@@ -1154,7 +1345,14 @@ def verificar_evento(evento_id):
         i.numero_inscripcion,
         i.estado_pago,
         d.nombre AS distancia,
-        d.precio
+        d.precio,
+        i.id AS inscripcion_id,
+        d.incluye_remera,
+        EXISTS (
+            SELECT 1 FROM pagos pay
+            WHERE pay.inscripcion_id = i.id
+              AND pay.estado IN ('aprobado', 'pagado')
+        ) AS pago_confirmado
     FROM inscripciones i
     JOIN personas p ON p.id = i.persona_id
     JOIN distancias d ON d.id = i.distancia_id
@@ -1165,10 +1363,9 @@ def verificar_evento(evento_id):
 
     fila = cursor.fetchone()
 
-    cursor.close()
-    conn.close()
-
     if not fila:
+        cursor.close()
+        conn.close()
         return """
         <div style="
         max-width:420px;
@@ -1190,9 +1387,34 @@ def verificar_evento(evento_id):
     distancia = fila["distancia"]
     precio = float(fila["precio"])
     estado_pago = fila["estado_pago"]
+    pago_confirmado = bool(fila["pago_confirmado"])
+    tipo_revision = None
+    if pago_confirmado and estado_pago == "vencido":
+        talles = obtener_talles_inscripcion(cursor, fila["inscripcion_id"])
+        reserva_disponible = True
+        if fila["incluye_remera"]:
+            reserva_disponible, _ = consultar_stock_talles(
+                cursor, evento_id, talles,
+                excluir_inscripcion_id=fila["inscripcion_id"],
+                permitir_inactivos=contar_seleccionados(talles),
+            ) if talles else (False, "sin_configuracion")
+        tipo_revision = estado_revision_pago(
+            pago_confirmado, bool(fila["incluye_remera"]), reserva_disponible
+        )
+    cursor.close()
+    conn.close()
 
     
-    if precio == 0:
+    if pago_confirmado:
+        if tipo_revision == "revisar_remera":
+            estado = "⚠️ Pago aprobado - revisar disponibilidad de remera"
+        elif estado_pago == "vencido":
+            estado = "⚠️ Pago aprobado - inscripción requiere revisión manual"
+        else:
+            estado = "💰 Pago confirmado ✅"
+        boton = ""
+
+    elif precio == 0:
 
         estado = "💰 Inscripción gratuita ✅"
         boton = ""
@@ -2337,34 +2559,29 @@ def reporte_remeras(evento_id):
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
-    cursor.execute("""
-    SELECT talle_remera, COUNT(*) AS cantidad
-    FROM inscripciones
-    WHERE evento_id = %s
-    AND estado_pago IN ('pagado','gratis')
-    AND talle_remera IS NOT NULL
-    AND talle_remera <> ''
-    AND talle_remera <> 'None'
-    GROUP BY talle_remera
-    ORDER BY talle_remera
-    """, (evento_id,))
-
-    talles = cursor.fetchall()
+    cantidades = obtener_talles_comprometidos(cursor, evento_id)
+    orden_talles = {t: i for i, t in enumerate(
+        ("XS", "S", "M", "L", "XL", "XXL", "XXXL")
+    )}
+    talles = sorted(
+        cantidades.items(),
+        key=lambda par: (orden_talles.get(par[0], 99), par[0])
+    )
 
     cursor.close()
     conn.close()
 
-    salida = "<h1>Reporte de remeras</h1>"
+    salida = "<h1>Reporte de remeras comprometidas</h1>"
 
     salida += "<table border='1' cellpadding='8'>"
     salida += "<tr><th>Talle</th><th>Cantidad</th></tr>"
 
-    for t in talles:
+    for talle, cantidad in talles:
 
         salida += f"""
         <tr>
-        <td>{t['talle_remera']}</td>
-        <td>{t['cantidad']}</td>
+        <td>{talle}</td>
+        <td>{cantidad}</td>
         </tr>
         """
 
@@ -2777,44 +2994,19 @@ def inscribirse(evento_id):
             conn = get_db_connection()
             cursor = conn.cursor(dictionary=True)
 
-            if usa_control_stock(evento_id):
-
-                cursor.execute("""
-                SELECT
-                    sr.talle,
-                    sr.stock,
-                    COUNT(i.id) AS usados
-                FROM stock_remeras sr
-
-                LEFT JOIN inscripciones i
-                    ON i.evento_id = sr.evento_id
-                    AND UPPER(i.talle_remera) = UPPER(sr.talle)
-                    AND i.estado_pago IN ('pagado','gratis')
-
-                WHERE sr.evento_id = %s
-
-                GROUP BY sr.id, sr.talle, sr.stock
-
-                ORDER BY FIELD(sr.talle,'XS','S','M','L','XL','XXL','XXXL')
-                """, (evento_id,))
-
-                talles = []
-
-                for fila in cursor.fetchall():
-
-                    if fila["usados"] < fila["stock"]:
-                        talles.append({"talle": fila["talle"]})
-
-            else:
-
-                cursor.execute("""
-                SELECT talle
+            cursor.execute("""
+                SELECT talle, stock
                 FROM stock_remeras
-                WHERE evento_id = %s
-                ORDER BY FIELD(talle,'XS','S','M','L','XL','XXL','XXXL')
-                """, (evento_id,))
-
-                talles = cursor.fetchall()
+                WHERE evento_id = %s AND activo = 1
+                ORDER BY FIELD(talle,'XS','S','M','L','XL','XXL','XXXL'), talle
+            """, (evento_id,))
+            talles_configurados = cursor.fetchall()
+            comprometidos = obtener_talles_comprometidos(cursor, evento_id)
+            talles = [
+                {"talle": fila["talle"]}
+                for fila in talles_configurados
+                if comprometidos[fila["talle"].strip().upper()] < fila["stock"]
+            ]
 
             salida += '<h3>Talle de remera</h3>'
             salida += '<select name="talle_remera" required style="padding:10px;border-radius:6px;">'
@@ -3228,19 +3420,20 @@ def inscribirse(evento_id):
         datos = cursor.fetchone()
         print(datos)
 
+        incluye_remera = datos["incluye_remera"]
         participantes = datos.get("participantes_por_inscripcion", 1)
 
-        if datos["incluye_remera"] == 0:
+        if incluye_remera == 0:
             talle_remera = None
             talle_remera2 = None
 
-        if datos["incluye_remera"] == 1 and not talle_remera:
+        if incluye_remera == 1 and not talle_remera:
             cursor.close()
             conn.close()
             return "<h2>Debe seleccionar talle de remera.</h2>"
 
         if (
-            datos["incluye_remera"] == 1
+            incluye_remera == 1
             and participantes >= 2
             and not talle_remera2
         ):
@@ -3506,6 +3699,29 @@ def inscribirse(evento_id):
         # insertar inscripción
         # -----------------------------
 
+        if incluye_remera == 1:
+            talles_solicitados = [talle_remera]
+            if participantes > 1:
+                talles_solicitados.append(talle_remera2)
+
+            disponible, motivo = validar_stock_talles(
+                cursor, evento_id, talles_solicitados
+            )
+            if not disponible:
+                conn.rollback()
+                cursor.close()
+                conn.close()
+                mensaje = (
+                    "Ese talle está desactivado o ya no tiene stock suficiente."
+                    if motivo == "agotado"
+                    else "Ese talle ya no está disponible."
+                )
+                return f"""
+                <h2>{mensaje}</h2>
+                <p>Volvé al formulario y seleccioná talles con stock.</p>
+                <button onclick="history.back()">Volver</button>
+                """
+
         fecha_inscripcion = datetime.now(ZoneInfo("America/Argentina/Buenos_Aires")).strftime("%Y-%m-%d %H:%M:%S")
 
         origen = session.get("utm_source", "directo")
@@ -3542,8 +3758,6 @@ def inscribirse(evento_id):
         ))
               
         
-        conn.commit()
-
         inscripcion_id = cursor.lastrowid
         
         # Vincular participante 1 a la inscripción
@@ -3783,6 +3997,65 @@ def panel_evento(evento_id):
     </div>
     """
 
+    # Cobros confirmados con inscripción vencida: distinguir falta de stock
+    # actual de otros motivos sin atribuir automáticamente todos al talle.
+    cursor.execute("""
+        SELECT
+            i.id,
+            i.evento_id,
+            i.numero_inscripcion,
+            p.nombre,
+            p.apellido,
+            d.incluye_remera
+        FROM inscripciones i
+        JOIN personas p ON p.id = i.persona_id
+        JOIN distancias d ON d.id = i.distancia_id
+        WHERE i.evento_id = %s
+          AND i.estado_pago = 'vencido'
+          AND EXISTS (
+              SELECT 1 FROM pagos pay
+              WHERE pay.inscripcion_id = i.id
+                AND pay.estado IN ('aprobado', 'pagado')
+          )
+        ORDER BY i.numero_inscripcion
+    """, (evento_id,))
+    pagos_sin_reserva = cursor.fetchall()
+    if pagos_sin_reserva:
+        salida += """
+        <div style="background:#fff3cd;color:#664d03;border:1px solid #ffecb5;
+                    border-radius:8px;padding:14px;margin:12px 0;">
+            <b>Inscripciones vencidas con pago confirmado: requieren revisión.</b>
+            <div>El pago se conserva. La alerta de remera se muestra solo si la disponibilidad actual es insuficiente.</div>
+        """
+        for pago in pagos_sin_reserva:
+            talles = obtener_talles_inscripcion(cursor, pago["id"])
+            disponible = True
+            if pago["incluye_remera"]:
+                disponible, _ = consultar_stock_talles(
+                    cursor, evento_id, talles,
+                    excluir_inscripcion_id=pago["id"],
+                    permitir_inactivos=contar_seleccionados(talles),
+                ) if talles else (False, "sin_configuracion")
+            clase_revision = estado_revision_pago(
+                True, bool(pago["incluye_remera"]), disponible
+            )
+            aviso = (
+                "Pago aprobado - revisar disponibilidad de remera"
+                if clase_revision == "revisar_remera"
+                else "Pago aprobado - revisar inscripción"
+            )
+            nombre_corredor = " ".join(
+                p for p in (pago["nombre"], pago["apellido"]) if p
+            )
+            salida += f"""
+            <div>
+                <a href="/inscripcion/{pago['numero_inscripcion']}?tab=pago">
+                    {pago['numero_inscripcion']} — {nombre_corredor} — {aviso}
+                </a>
+            </div>
+            """
+        salida += "</div>"
+
     
     # -------------------
     # total inscriptos
@@ -3791,7 +4064,14 @@ def panel_evento(evento_id):
     SELECT COUNT(*) AS total
     FROM inscripciones
     WHERE evento_id = %s
-    AND estado_pago <> 'vencido'
+    AND (
+        estado_pago <> 'vencido'
+        OR EXISTS (
+            SELECT 1 FROM pagos pay
+            WHERE pay.inscripcion_id = inscripciones.id
+              AND pay.estado IN ('aprobado', 'pagado')
+        )
+    )
     """, (evento_id,))
 
     total_inscriptos = cursor.fetchone()["total"]
@@ -3831,11 +4111,21 @@ def panel_evento(evento_id):
     # -------------------
     cursor.execute("""
     SELECT 
-        SUM(CASE
-            WHEN p.estado = 'aprobado'
-            THEN p.monto
-            ELSE 0
-        END) AS cobrado,
+        (
+            SELECT SUM(unico.monto_unico)
+            FROM (
+                SELECT
+                    inscripcion_id,
+                    COALESCE(NULLIF(referencia_externa, ''), CONCAT('pago:', id)) AS referencia_unica,
+                    MAX(monto) AS monto_unico
+                FROM pagos
+                WHERE estado IN ('aprobado', 'pagado')
+                GROUP BY inscripcion_id,
+                         COALESCE(NULLIF(referencia_externa, ''), CONCAT('pago:', id))
+            ) unico
+            JOIN inscripciones pagada ON pagada.id = unico.inscripcion_id
+            WHERE pagada.evento_id = %s
+        ) AS cobrado,
 
         SUM(CASE
             WHEN p.estado = 'pendiente'
@@ -3852,7 +4142,7 @@ def panel_evento(evento_id):
     FROM pagos p
     JOIN inscripciones i ON p.inscripcion_id = i.id
     WHERE i.evento_id = %s
-    """, (evento_id,))
+    """, (evento_id, evento_id))
     pagos = cursor.fetchone()
 
     cursor.execute("""
@@ -3880,7 +4170,14 @@ def panel_evento(evento_id):
     SELECT COUNT(*) as total
     FROM inscripciones
     WHERE evento_id = %s
-    AND estado_pago IN ('pagado','aprobado')
+    AND (
+        estado_pago IN ('pagado','aprobado')
+        OR EXISTS (
+            SELECT 1 FROM pagos pay
+            WHERE pay.inscripcion_id = inscripciones.id
+              AND pay.estado IN ('aprobado', 'pagado')
+        )
+    )
     """, (evento_id,))
     total_pagados = cursor.fetchone()["total"]
     if total_inscriptos > 0:

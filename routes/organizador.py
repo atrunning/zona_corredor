@@ -9,6 +9,16 @@ from openpyxl import Workbook
 import io
 from flask import session, redirect
 from datetime import datetime
+from stock_remeras import (
+    contar_seleccionados,
+    guardar_talle_participante,
+    normalizar_talle,
+    obtener_talles_comprometidos,
+    obtener_talles_inscripcion,
+    presentacion_disponibilidad,
+    validar_cambio_stock_talles,
+    validar_stock_talles,
+)
 organizador_bp = Blueprint("organizador", __name__)
 
 
@@ -50,7 +60,12 @@ def ver_inscriptos(evento_id):
 
         COUNT(i.id) AS total,
 
-        SUM(CASE WHEN i.estado_pago IN ('pagado','bonificado') THEN 1 ELSE 0 END) AS pagados,
+        SUM(CASE WHEN i.estado_pago IN ('pagado','bonificado','gratis')
+                  OR EXISTS (
+                      SELECT 1 FROM pagos pay
+                      WHERE pay.inscripcion_id = i.id
+                        AND pay.estado IN ('aprobado','pagado')
+                  ) THEN 1 ELSE 0 END) AS pagados,
         SUM(CASE WHEN i.estado_pago = 'pendiente' THEN 1 ELSE 0 END) AS pendientes,
         SUM(CASE WHEN i.estado_pago = 'vencido' THEN 1 ELSE 0 END) AS vencidos
 
@@ -97,6 +112,11 @@ def ver_inscriptos(evento_id):
         p.email,
         p.celular,
         i.estado_pago,
+        EXISTS (
+            SELECT 1 FROM pagos pay
+            WHERE pay.inscripcion_id = i.id
+              AND pay.estado IN ('aprobado','pagado')
+        ) AS pago_confirmado,
         t.nombre AS team
     FROM inscripciones i
     JOIN personas p ON p.id = i.persona_id
@@ -106,7 +126,7 @@ def ver_inscriptos(evento_id):
     """
 
     if not mostrar_vencidos:
-        sql += " AND i.estado_pago <> 'vencido' "
+        sql += " AND (i.estado_pago <> 'vencido' OR EXISTS (SELECT 1 FROM pagos pay WHERE pay.inscripcion_id = i.id AND pay.estado IN ('aprobado','pagado'))) "
 
     parametros = [evento_id]
 
@@ -148,7 +168,7 @@ def ver_inscriptos(evento_id):
     parametros_total = [evento_id]
 
     if not mostrar_vencidos:
-        sql_total += " AND i.estado_pago <> 'vencido' "
+        sql_total += " AND (i.estado_pago <> 'vencido' OR EXISTS (SELECT 1 FROM pagos pay WHERE pay.inscripcion_id = i.id AND pay.estado IN ('aprobado','pagado'))) "
 
     if buscar:
 
@@ -462,6 +482,8 @@ def ver_inscriptos(evento_id):
             estado = "<span style='background:#ff9800;color:white;padding:4px 8px;border-radius:4px'>Pendiente</span>"
         elif estado_db == "bonificado":
              estado = "<span style='background:#2196F3;color:white;padding:4px 8px;border-radius:4px'>🎁 Bonificado</span>"    
+        elif estado_db == "vencido" and ins.get("pago_confirmado"):
+            estado = "<span style='background:#fff3cd;color:#664d03;padding:4px 8px;border-radius:4px'>Pago aprobado - revisar</span>"
         elif estado_db == "vencido":
             estado = "<span style='background:#f44336;color:white;padding:4px 8px;border-radius:4px'>Vencido</span>"
         else:
@@ -766,6 +788,46 @@ def inscripcion_manual(evento_id):
         genero = request.form.get("genero")
         fecha_nac = request.form.get("fecha_nac") or None
         distancia_id = request.form.get("distancia_id")
+        talle_remera = (request.form.get("talle_remera") or "").strip()
+
+        cursor.execute("""
+            SELECT incluye_remera
+            FROM distancias
+            WHERE id = %s AND evento_id = %s AND activo = 1
+        """, (distancia_id, evento_id))
+        distancia_manual = cursor.fetchone()
+        if not distancia_manual:
+            cursor.close()
+            conn.close()
+            return "La distancia seleccionada no está disponible."
+
+        if distancia_manual["incluye_remera"]:
+            if not talle_remera:
+                cursor.close()
+                conn.close()
+                return "<h2>Seleccioná un talle de remera.</h2>"
+
+            cursor.execute("""
+                SELECT stock
+                FROM stock_remeras
+                WHERE evento_id = %s AND UPPER(talle) = UPPER(%s) AND activo = 1
+                FOR UPDATE
+            """, (evento_id, talle_remera))
+            filas_stock = cursor.fetchall()
+            comprometidos = obtener_talles_comprometidos(
+                cursor, evento_id, bloquear=True
+            )
+            talle_clave = talle_remera.upper()
+            if (
+                len(filas_stock) != 1
+                or comprometidos[talle_clave] >= filas_stock[0]["stock"]
+            ):
+                conn.rollback()
+                cursor.close()
+                conn.close()
+                return "<h2>Ese talle no tiene stock disponible.</h2>"
+        else:
+            talle_remera = None
 
         # Buscar persona
         cursor.execute("SELECT id FROM personas WHERE dni=%s", (dni,))
@@ -855,14 +917,16 @@ def inscripcion_manual(evento_id):
             evento_id,
             distancia_id,
             estado_pago,
+            talle_remera,
             fecha_inscripcion,
             cupon_id
         )
-        VALUES (%s,%s,%s,'pendiente',NOW(),%s)
+        VALUES (%s,%s,%s,'pendiente',%s,NOW(),%s)
         """, (
             persona_id,
             evento_id,
             distancia_id,
+            talle_remera,
             cupon_id
         ))
 
@@ -912,7 +976,7 @@ def inscripcion_manual(evento_id):
     # GET → mostrar formulario
     # =========================
     cursor.execute("""
-        SELECT id, nombre, precio
+        SELECT id, nombre, precio, incluye_remera
         FROM distancias
         WHERE evento_id = %s AND activo = 1
     """, (evento_id,))
@@ -921,7 +985,25 @@ def inscripcion_manual(evento_id):
 
     opciones = ""
     for d in distancias:
-        opciones += f"<option value='{d['id']}'>{d['nombre']} - ${d['precio']}</option>"
+        etiqueta_remera = " - incluye remera" if d["incluye_remera"] else ""
+        opciones += f"<option value='{d['id']}'>{d['nombre']} - ${d['precio']}{etiqueta_remera}</option>"
+
+    cursor.execute("""
+        SELECT talle, stock
+        FROM stock_remeras
+        WHERE evento_id = %s AND activo = 1
+        ORDER BY FIELD(talle,'XS','S','M','L','XL','XXL','XXXL'), talle
+    """, (evento_id,))
+    talles_configurados = cursor.fetchall()
+    comprometidos = obtener_talles_comprometidos(cursor, evento_id)
+    talles_disponibles = [
+        t for t in talles_configurados
+        if comprometidos[t["talle"].strip().upper()] < t["stock"]
+    ]
+    opciones_talles = "".join(
+        f"<option value='{t['talle']}'>{t['talle']}</option>"
+        for t in talles_disponibles
+    )
 
     cursor.close()
     conn.close()
@@ -988,6 +1070,12 @@ def inscripcion_manual(evento_id):
     Distancia<br>
     <select name="distancia_id">
     {opciones}
+    </select><br><br>
+
+    Talle de remera (si la distancia incluye remera)<br>
+    <select name="talle_remera">
+        <option value="">Seleccionar talle</option>
+        {opciones_talles}
     </select><br><br>
 
     <div id="campos-extra"></div>
@@ -1207,32 +1295,15 @@ def talles_form(evento_id):
     cursor = conn.cursor(dictionary=True)
 
     cursor.execute("""
-    SELECT
-        sr.id,
-        sr.talle,
-        sr.stock,
-        sr.activo,
-        COUNT(i.id) AS vendidos
-
-    FROM stock_remeras sr
-
-    LEFT JOIN inscripciones i
-        ON i.evento_id = sr.evento_id
-        AND UPPER(i.talle_remera) = UPPER(sr.talle)
-        AND i.estado_pago IN ('pagado','bonificado')
-
-    WHERE sr.evento_id = %s
-
-    GROUP BY
-        sr.id,
-        sr.talle,
-        sr.stock,
-        sr.activo
-
-    ORDER BY FIELD(sr.talle,'XS','S','M','L','XL','XXL','XXXL')
-    """, (evento_id,))               
-
+    SELECT id, talle, stock, activo
+    FROM stock_remeras
+    WHERE evento_id = %s
+    ORDER BY FIELD(talle,'XS','S','M','L','XL','XXL','XXXL'), talle
+    """, (evento_id,))
     remeras = cursor.fetchall()
+    comprometidos = obtener_talles_comprometidos(cursor, evento_id)
+    for remera in remeras:
+        remera["vendidos"] = comprometidos[remera["talle"].strip().upper()]
 
     cursor.close()
     conn.close()
@@ -1242,7 +1313,7 @@ def talles_form(evento_id):
     salida = f"""
     <h2>👕 Stock de remeras</h2>
     """
-    if error == "vendido":
+    if error in {"vendido", "stock_bajo"}:
         salida += """
         <div style="
             background:#ffe6e6;
@@ -1252,8 +1323,10 @@ def talles_form(evento_id):
             margin:10px 0;
             border-radius:5px;
             font-weight:bold;">
-            ⚠️ No se puede eliminar el talle porque ya tiene remeras asignadas.
-            Puede desactivarlo si no desea ofrecerlo.
+            ⚠️ Revisá los cambios: el stock no puede ser negativo, duplicar un
+            talle ni quedar por debajo de las remeras comprometidas. Las
+            inscripciones pendientes reservan stock por 15 días; al vencer,
+            se libera automáticamente.
         </div>
         """
     salida += f"""
@@ -1268,7 +1341,7 @@ def talles_form(evento_id):
         <th>Activo</th>
         <th>Talle</th>
         <th>Stock</th>
-        <th>Vendidas</th>
+        <th>Comprometidas</th>
         <th>Disponibles</th>
         <th>Acción</th>
     </tr>
@@ -1278,7 +1351,17 @@ def talles_form(evento_id):
     
         checked = "checked" if r["activo"] else ""
 
-        libres = r["stock"] - r["vendidos"]
+        libres, faltante = presentacion_disponibilidad(
+            r["stock"], r["vendidos"]
+        )
+        alerta_faltante = ""
+        if faltante:
+            unidad = "remera" if faltante == 1 else "remeras"
+            alerta_faltante = f"""
+                <div style="color:#900;font-weight:bold;margin-top:4px;">
+                    Faltante de stock: {faltante} {unidad} {r['talle']}
+                </div>
+            """
 
         salida += f"""
         <tr>
@@ -1299,8 +1382,9 @@ def talles_form(evento_id):
             <td>
                 <input
                     type="number"
-                    name="stock_{r['talle']}"
+                    name="stock_{r['id']}"
                     value="{r['stock']}"
+                    min="0"
                     style="width:70px">
             </td>
 
@@ -1310,6 +1394,7 @@ def talles_form(evento_id):
 
             <td align="center">
                 <b>{libres}</b>
+                {alerta_faltante}
             </td>
 
             <td align="center">
@@ -1317,8 +1402,9 @@ def talles_form(evento_id):
                 <button
                     type="button"
                     class="eliminar"
+                    title="Desactivar talle conservando el histórico"
                     onclick="eliminarTalle({evento_id},{r['id']})">
-                    🗑️
+                    ⏸️
                 </button>
 
             </td>
@@ -1456,76 +1542,94 @@ def talles_form(evento_id):
 
     return layout(salida,evento_id=evento_id)
 @organizador_bp.route("/evento/<int:evento_id>/guardar_stock", methods=["POST"])
-def guardar_stock(evento_id): 
- 
-    conn = get_db_connection() 
-    cursor = conn.cursor(dictionary=True) 
- 
-    cursor.execute(""" 
-    SELECT id,talle 
-    FROM stock_remeras 
-    WHERE evento_id=%s 
-    """,(evento_id,)) 
- 
-    talles = cursor.fetchall() 
- 
-    for t in talles: 
- 
-        stock = request.form.get(f"stock_{t['talle']}") 
-        activo = 1 if request.form.get(f"activo_{t['id']}") else 0 
- 
-        cursor.execute(""" 
-        UPDATE stock_remeras 
-        SET stock=%s, 
-            activo=%s 
-        WHERE id=%s 
-        """, ( 
-            stock, 
-            activo, 
-            t["id"] 
-        )) 
- 
-    nuevos_talles = request.form.getlist("nuevo_talle[]") 
-    nuevos_stock = request.form.getlist("nuevo_stock[]") 
- 
-    for talle, stock in zip(nuevos_talles, nuevos_stock): 
- 
-        talle = talle.strip() 
- 
-        if talle == "": 
-            continue 
- 
-        cursor.execute(""" 
-            INSERT INTO stock_remeras 
-            (evento_id, talle, stock) 
-            VALUES (%s,%s,%s) 
-        """, ( 
-            evento_id, 
-            talle, 
-            stock 
-        ))
+def guardar_stock(evento_id):
 
-    # Sincronizar talles_evento con los talles activos de stock_remeras
-    cursor.execute( 
-        "DELETE FROM talles_evento WHERE evento_id = %s", 
-        (evento_id,) 
-    ) 
- 
-    cursor.execute(""" 
-        SELECT DISTINCT talle 
-        FROM stock_remeras 
-        WHERE evento_id = %s 
-          AND activo = 1 
-        ORDER BY talle 
-    """, (evento_id,)) 
- 
-    talles_activos = cursor.fetchall() 
- 
-    for t in talles_activos: 
-        cursor.execute(""" 
-            INSERT INTO talles_evento (evento_id, talle) 
-            VALUES (%s, %s) 
-        """, (evento_id, t["talle"])) 
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+
+    cursor.execute("""
+    SELECT id, talle
+    FROM stock_remeras
+    WHERE evento_id = %s
+    FOR UPDATE
+    """, (evento_id,))
+    talles = cursor.fetchall()
+    comprometidos = obtener_talles_comprometidos(
+        cursor, evento_id, bloquear=True
+    )
+
+    actualizaciones = []
+    nombres_existentes = {t["talle"].strip().upper() for t in talles}
+    for talle in talles:
+        valor_stock = request.form.get(f"stock_{talle['id']}")
+        try:
+            stock = int(valor_stock)
+        except (TypeError, ValueError):
+            conn.rollback()
+            cursor.close()
+            conn.close()
+            return redirect(f"/evento/{evento_id}/talles_form?error=stock_bajo")
+
+        cantidad_comprometida = comprometidos[talle["talle"].strip().upper()]
+        if stock < 0 or stock < cantidad_comprometida:
+            conn.rollback()
+            cursor.close()
+            conn.close()
+            return redirect(f"/evento/{evento_id}/talles_form?error=stock_bajo")
+
+        activo = 1 if request.form.get(f"activo_{talle['id']}") else 0
+        actualizaciones.append((stock, activo, talle["id"]))
+
+    nuevos_talles = request.form.getlist("nuevo_talle[]")
+    nuevos_stock = request.form.getlist("nuevo_stock[]")
+    nuevos = []
+    for talle_nuevo, stock_nuevo in zip(nuevos_talles, nuevos_stock):
+        talle_nuevo = talle_nuevo.strip().upper()
+        if not talle_nuevo:
+            continue
+        try:
+            stock_nuevo = int(stock_nuevo)
+        except (TypeError, ValueError):
+            stock_nuevo = -1
+        if stock_nuevo < 0 or talle_nuevo in nombres_existentes:
+            conn.rollback()
+            cursor.close()
+            conn.close()
+            return redirect(f"/evento/{evento_id}/talles_form?error=stock_bajo")
+        nombres_existentes.add(talle_nuevo)
+        nuevos.append((talle_nuevo, stock_nuevo))
+
+    for stock, activo, talle_id in actualizaciones:
+        cursor.execute("""
+            UPDATE stock_remeras
+            SET stock = %s, activo = %s
+            WHERE id = %s AND evento_id = %s
+        """, (stock, activo, talle_id, evento_id))
+
+    for talle_nuevo, stock_nuevo in nuevos:
+        cursor.execute("""
+            INSERT INTO stock_remeras (evento_id, talle, stock, activo)
+            VALUES (%s, %s, %s, 1)
+        """, (evento_id, talle_nuevo, stock_nuevo))
+
+    # Mantener talles_evento como catálogo histórico: agregar faltantes, nunca
+    # borrar opciones antiguas al desactivar un talle.
+    cursor.execute("""
+        SELECT DISTINCT talle
+        FROM stock_remeras
+        WHERE evento_id = %s AND activo = 1
+    """, (evento_id,))
+    for fila in cursor.fetchall():
+        cursor.execute("""
+            SELECT COUNT(*) AS total
+            FROM talles_evento
+            WHERE evento_id = %s AND UPPER(talle) = UPPER(%s)
+        """, (evento_id, fila["talle"]))
+        if cursor.fetchone()["total"] == 0:
+            cursor.execute("""
+                INSERT INTO talles_evento (evento_id, talle)
+                VALUES (%s, %s)
+            """, (evento_id, fila["talle"]))
  
     conn.commit() 
     cursor.close() 
@@ -1538,12 +1642,13 @@ def eliminar_talle(evento_id, id):
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
-    # Buscar el talle
+    # Desactivar el talle sin borrar su configuración histórica.
     cursor.execute("""
     SELECT talle
     FROM stock_remeras
-    WHERE id=%s
-    """, (id,))
+    WHERE id=%s AND evento_id=%s
+    FOR UPDATE
+    """, (id, evento_id))
 
     registro = cursor.fetchone()
 
@@ -1554,35 +1659,15 @@ def eliminar_talle(evento_id, id):
 
     talle = registro["talle"]
 
-    # Verificar si tiene ventas pagadas
     cursor.execute("""
-    SELECT COUNT(*) AS total
-    FROM inscripciones
-    WHERE evento_id=%s
-    AND talle_remera=%s
-    AND estado_pago IN ('pagado','bonificado')
-    """, (evento_id, talle))
-
-    total = cursor.fetchone()["total"]
-
-    if total == 0:
-
-        cursor.execute("""
-        DELETE FROM stock_remeras
-        WHERE id=%s
-        """, (id,))
-
-        conn.commit()
-
-        cursor.close()
-        conn.close()
-
-        return redirect(f"/evento/{evento_id}/talles_form")
-
+        UPDATE stock_remeras
+        SET activo = 0
+        WHERE id = %s AND evento_id = %s
+    """, (id, evento_id))
+    conn.commit()
     cursor.close()
     conn.close()
-
-    return redirect(f"/evento/{evento_id}/talles_form?error=vendido")
+    return redirect(f"/evento/{evento_id}/talles_form")
 @organizador_bp.route("/corredores")
 def ver_corredores():
 
@@ -2661,6 +2746,36 @@ def editar_inscripcion(numero):
 
         if accion == "marcar_pagado":
             cursor.execute("""
+                SELECT i.id, i.evento_id, i.estado_pago, d.incluye_remera
+                FROM inscripciones i
+                JOIN distancias d ON d.id = i.distancia_id
+                WHERE i.numero_inscripcion = %s
+            """, (numero,))
+            pago_inscripcion = cursor.fetchone()
+            if not pago_inscripcion:
+                cursor.close()
+                conn.close()
+                return "Inscripción no encontrada"
+
+            if pago_inscripcion["incluye_remera"]:
+                talles = obtener_talles_inscripcion(cursor, pago_inscripcion["id"])
+                disponible, _motivo = validar_stock_talles(
+                    cursor,
+                    pago_inscripcion["evento_id"],
+                    talles,
+                    excluir_inscripcion_id=pago_inscripcion["id"],
+                    permitir_inactivos=contar_seleccionados(talles),
+                ) if talles else (False, "sin_configuracion")
+                if not disponible:
+                    conn.rollback()
+                    cursor.close()
+                    conn.close()
+                    return """
+                    <h2>No hay stock suficiente para confirmar esta inscripción.</h2>
+                    <p>El talle existente se conserva; verificá el stock antes de marcar el pago.</p>
+                    """
+
+            cursor.execute("""
             UPDATE inscripciones
             SET estado_pago = 'pagado'
             WHERE numero_inscripcion = %s
@@ -2704,7 +2819,8 @@ def editar_inscripcion(numero):
         distancia_id = request.form.get("distancia_id")
 
         cursor.execute("""
-        SELECT id, evento_id, distancia_id, estado_pago
+        SELECT id, evento_id, distancia_id, estado_pago, fecha_inscripcion,
+               talle_remera
         FROM inscripciones
         WHERE numero_inscripcion = %s
         """, (numero,))
@@ -2738,6 +2854,8 @@ def editar_inscripcion(numero):
 
         participantes_inscripcion = cursor.fetchall()
 
+        talles_adicionales = []
+
         if not distancia_id:
             distancia_id = ins["distancia_id"]
         
@@ -2768,7 +2886,6 @@ def editar_inscripcion(numero):
                     "INSERT INTO teams (nombre,organizador_id) VALUES (%s,%s)",
                     (team_nombre,1)
                 )
-                conn.commit()
                 team_id = cursor.lastrowid
 
         
@@ -2832,6 +2949,7 @@ def editar_inscripcion(numero):
             talle_participante = request.form.get(
                 f"participante_talle_remera_{orden}"
             )
+            talles_adicionales.append((orden, talle_participante))
 
             # -------------------------
             # ACTUALIZAR DATOS PERSONALES
@@ -2856,20 +2974,50 @@ def editar_inscripcion(numero):
                     persona_id
                 ))
 
-                # -------------------------
-                # ACTUALIZAR TALLE
-                # -------------------------
+        # Validar cambios de talle hechos desde la edición del organizador.
+        cursor.execute("""
+            SELECT incluye_remera
+            FROM distancias
+            WHERE id = %s AND evento_id = %s
+        """, (distancia_id, evento_id))
+        distancia_remera = cursor.fetchone()
+        if distancia_remera and distancia_remera["incluye_remera"]:
+            talles_nuevos = [talle] + [t for _, t in talles_adicionales]
+            if any(not (t or "").strip() for t in talles_nuevos):
+                conn.rollback()
+                cursor.close()
+                conn.close()
+                return "<h2>Seleccioná un talle para cada participante.</h2>"
 
-                cursor.execute("""
-                UPDATE inscripcion_participantes
-                SET talle_remera=%s
-                WHERE inscripcion_id=%s
-                AND orden=%s
-                """, (
-                    talle_participante,
-                    inscripcion_id,
-                    orden
-                ))
+            talles_anteriores = obtener_talles_inscripcion(cursor, inscripcion_id)
+            disponible, motivo = validar_cambio_stock_talles(
+                cursor,
+                evento_id,
+                talles_nuevos,
+                talles_anteriores,
+                excluir_inscripcion_id=inscripcion_id,
+            )
+            if not disponible:
+                conn.rollback()
+                cursor.close()
+                conn.close()
+                mensaje = (
+                    "El talle está desactivado para asignaciones nuevas."
+                    if motivo == "inactivo"
+                    else "No hay stock suficiente para esos talles."
+                )
+                return f"<h2>{mensaje}</h2>"
+
+        elif distancia_remera:
+            talle = None
+            talles_adicionales = [
+                (orden, None) for orden, _ in talles_adicionales
+            ]
+
+        for orden, talle_participante in talles_adicionales:
+            guardar_talle_participante(
+                cursor, inscripcion_id, orden, talle_participante
+            )
 
         # -------------------------
         # VALIDAR DORSAL REPETIDO
@@ -2888,6 +3036,7 @@ def editar_inscripcion(numero):
             
 
             if existe:
+                conn.rollback()
                 cursor.close()
                 conn.close()
                 return f"""
@@ -2904,6 +3053,12 @@ def editar_inscripcion(numero):
             talle_remera=%s
         WHERE numero_inscripcion=%s
         """, (dorsal, distancia_id, talle, numero))
+
+        cursor.execute("""
+            UPDATE inscripcion_participantes
+            SET talle_remera = %s
+            WHERE inscripcion_id = %s AND orden = 1
+        """, (talle, inscripcion_id))
 
         # ---------------------------------
         # SI CAMBIÓ DISTANCIA
@@ -3044,6 +3199,13 @@ def editar_inscripcion(numero):
     """, (inscripcion_id,))
 
     participantes_inscripcion = cursor.fetchall()
+
+    participante_principal = next(
+        (p for p in participantes_inscripcion if p.get("orden") == 1), None
+    )
+    talle_principal_actual = normalizar_talle(
+        (participante_principal or {}).get("talle_remera")
+    ) or normalizar_talle(ins.get("talle_remera"))
     
     if ins and ins.get("fecha_nac"):
         ins["fecha_nac"] = ins["fecha_nac"].strftime("%Y-%m-%d")
@@ -3503,19 +3665,29 @@ def editar_inscripcion(numero):
     
     
     cursor.execute("""
-    SELECT talle FROM talles_evento
-    WHERE evento_id = %s
+    SELECT talle FROM stock_remeras
+    WHERE evento_id = %s AND activo = 1
     ORDER BY talle
     """, (ins["evento_id"],))
-
     talles = cursor.fetchall()
+    talles_visibles = {normalizar_talle(t["talle"]): t["talle"] for t in talles}
+    talles_historicos = {
+        normalizar_talle(p.get("talle_remera")): p.get("talle_remera")
+        for p in participantes_inscripcion if normalizar_talle(p.get("talle_remera"))
+    }
+    if talle_principal_actual and talle_principal_actual not in talles_visibles:
+        talles_historicos.setdefault(talle_principal_actual, talle_principal_actual)
     salida += "Talle remera<br>"
     salida += '<select name="talle_remera">'
     salida += '<option value="">Seleccionar</option>'
-
-    for t in talles:
-        selected = "selected" if ins.get("talle_remera") == t["talle"] else ""
-        salida += f"<option value='{t['talle']}' {selected}>{t['talle']}</option>"
+    for talle_opcion in sorted(talles_visibles.values(), key=str.upper):
+        selected = "selected" if talle_principal_actual == normalizar_talle(talle_opcion) else ""
+        salida += f"<option value='{talle_opcion}' {selected}>{talle_opcion}</option>"
+    for talle_opcion in sorted(talles_historicos.values(), key=str.upper):
+        if normalizar_talle(talle_opcion) in talles_visibles:
+            continue
+        selected = "selected" if talle_principal_actual == normalizar_talle(talle_opcion) else ""
+        salida += f"<option value='{talle_opcion}' {selected}>{talle_opcion} (histórico)</option>"
     
     salida += '</select><br><br>'
 
@@ -3566,6 +3738,7 @@ def editar_inscripcion(numero):
             else:
                 fecha_nac = ""
 
+            talle_actual_participante = normalizar_talle(participante.get("talle_remera"))
             salida += f"""
             <div style="
                 border:1px solid #ccc;
@@ -3649,12 +3822,8 @@ def editar_inscripcion(numero):
 
                         <option value="">Seleccionar</option>
 
-                        <option value="XS"
-                        {"selected" if participante.get("talle_remera") == "XS" else ""}>
-                        XS
-                        </option>
-
-                        ...
+                        {''.join(f'<option value="{op}" {"selected" if talle_actual_participante == normalizar_talle(op) else ""}>{op}</option>' for op in sorted(talles_visibles.values(), key=str.upper))}
+                        {f'<option value="{talle_actual_participante}" selected>{talle_actual_participante} (histórico)</option>' if talle_actual_participante and talle_actual_participante not in talles_visibles else ''}
                     </select>
                 </div>    
 
@@ -3908,7 +4077,13 @@ def pantalla_pago(numero):
     cursor = conn.cursor(dictionary=True)
 
     cursor.execute("""
-    SELECT i.id, d.precio, d.nombre
+    SELECT i.id, i.evento_id, i.estado_pago, i.fecha_inscripcion,
+           i.talle_remera, d.precio, d.nombre, d.incluye_remera,
+           CASE
+               WHEN i.estado_pago = 'pendiente'
+                AND i.fecha_inscripcion < DATE_SUB(NOW(), INTERVAL 15 DAY)
+               THEN 1 ELSE 0
+           END AS reserva_vencida
     FROM inscripciones i
     JOIN distancias d ON d.id = i.distancia_id
     WHERE i.numero_inscripcion = %s
@@ -3940,24 +4115,67 @@ def pantalla_pago(numero):
         existe_pago = cursor.fetchone()
 
         if existe_pago:
+            cursor.close()
+            conn.close()
             return "<h2>⚠️ Esta inscripción ya tiene un pago Confirmado</h2>"
         if estado == "aprobado":
             estado = "pagado"
+
+        reserva_valida = True
+        if estado in ("pendiente", "pagado", "bonificado") and info["incluye_remera"]:
+            talles = obtener_talles_inscripcion(cursor, inscripcion_id)
+            reserva_valida, _motivo = validar_stock_talles(
+                cursor,
+                info["evento_id"],
+                talles,
+                excluir_inscripcion_id=inscripcion_id,
+                permitir_inactivos=contar_seleccionados(talles),
+            ) if talles else (False, "sin_configuracion")
+
+        if estado == "pendiente" and not reserva_valida:
+            conn.rollback()
+            cursor.close()
+            conn.close()
+            return "<h2>No hay stock disponible para iniciar esta reserva pendiente.</h2>"
+
         cursor.execute("""
         INSERT INTO pagos (inscripcion_id, monto, metodo, estado, fecha_creacion)
         VALUES (%s,%s,%s,%s,NOW())
         """, (inscripcion_id, monto, metodo, estado))
 
+        if reserva_valida:
+            if estado == "pendiente" and (
+                info["estado_pago"] == "vencido" or info["reserva_vencida"]
+            ):
+                cursor.execute("""
+                    UPDATE inscripciones
+                    SET estado_pago = %s, fecha_inscripcion = NOW()
+                    WHERE id = %s
+                """, (estado, inscripcion_id))
+            else:
+                cursor.execute("""
+                    UPDATE inscripciones
+                    SET estado_pago = %s
+                    WHERE id = %s
+                """, (estado, inscripcion_id))
+        else:
+            # El pago manual se registra, pero la inscripción no vuelve a
+            # comprometer remeras sin stock; queda visible para revisión.
+            cursor.execute("""
+                UPDATE inscripciones
+                SET estado_pago = 'vencido'
+                WHERE id = %s
+            """, (inscripcion_id,))
         conn.commit()
 
-        cursor.execute("""
-        UPDATE inscripciones
-        SET estado_pago=%s
-        WHERE id=%s
-        """, (estado, inscripcion_id))
-        conn.commit()
+        cursor.close()
+        conn.close()
+        if not reserva_valida:
+            return """
+            <h2>Pago registrado.</h2>
+            <p>No había stock suficiente para reservar las remeras. La inscripción quedó señalada para revisión manual.</p>
+            """
 
-        from flask import redirect
         return redirect(f"/inscripcion/{numero}?ok=1&tab=pago")
     
     
@@ -4004,9 +4222,17 @@ def editar_pago(pago_id):
 
     # traer pago
     cursor.execute("""
-    SELECT p.*, i.numero_inscripcion
+    SELECT p.*, i.numero_inscripcion, i.id AS inscripcion_id,
+           i.evento_id, i.estado_pago AS estado_inscripcion,
+           i.fecha_inscripcion, i.talle_remera, d.incluye_remera,
+           CASE
+               WHEN i.estado_pago = 'pendiente'
+                AND i.fecha_inscripcion < DATE_SUB(NOW(), INTERVAL 15 DAY)
+               THEN 1 ELSE 0
+           END AS reserva_vencida
     FROM pagos p
     JOIN inscripciones i ON i.id = p.inscripcion_id
+    JOIN distancias d ON d.id = i.distancia_id
     WHERE p.id = %s
     """, (pago_id,))
 
@@ -4024,20 +4250,59 @@ def editar_pago(pago_id):
         if estado == "aprobado":
             estado = "pagado"
 
+        reserva_valida = True
+        if estado in ("pendiente", "pagado", "bonificado") and pago["incluye_remera"]:
+            talles = obtener_talles_inscripcion(cursor, pago["inscripcion_id"])
+            reserva_valida, _motivo = validar_stock_talles(
+                cursor,
+                pago["evento_id"],
+                talles,
+                excluir_inscripcion_id=pago["inscripcion_id"],
+                permitir_inactivos=contar_seleccionados(talles),
+            ) if talles else (False, "sin_configuracion")
+
+        if estado == "pendiente" and not reserva_valida:
+            conn.rollback()
+            cursor.close()
+            conn.close()
+            return "<h2>No hay stock disponible para reactivar esta reserva pendiente.</h2>"
+
         cursor.execute("""
         UPDATE pagos
         SET monto=%s, metodo=%s, estado=%s
         WHERE id=%s
         """, (monto, metodo, estado, pago_id))
 
-        cursor.execute("""
-        UPDATE inscripciones
-        SET estado_pago=%s
-        WHERE id=%s
-        """, (estado, pago["inscripcion_id"]))
+        if reserva_valida:
+            if estado == "pendiente" and (
+                pago["estado_inscripcion"] == "vencido" or pago["reserva_vencida"]
+            ):
+                cursor.execute("""
+                    UPDATE inscripciones
+                    SET estado_pago = %s, fecha_inscripcion = NOW()
+                    WHERE id = %s
+                """, (estado, pago["inscripcion_id"]))
+            else:
+                cursor.execute("""
+                    UPDATE inscripciones
+                    SET estado_pago = %s
+                    WHERE id = %s
+                """, (estado, pago["inscripcion_id"]))
+        else:
+            cursor.execute("""
+                UPDATE inscripciones
+                SET estado_pago = 'vencido'
+                WHERE id = %s
+            """, (pago["inscripcion_id"],))
 
         conn.commit()
-
+        cursor.close()
+        conn.close()
+        if not reserva_valida:
+            return """
+            <h2>Pago actualizado.</h2>
+            <p>No había stock suficiente para reservar las remeras. La inscripción quedó señalada para revisión manual.</p>
+            """
         return redirect(f"/inscripcion/{pago['numero_inscripcion']}?ok=1&tab=pago")
 
     return layout(f"""
@@ -5156,10 +5421,19 @@ def exportar_excel(evento_id):
     LEFT JOIN (
         SELECT
             inscripcion_id,
-            SUM(monto) AS monto_total,
-            MAX(fecha_confirmacion) AS fecha_pago
-        FROM pagos
-        WHERE estado IN ('pagado','aprobado')
+            SUM(monto_unico) AS monto_total,
+            MAX(fecha_pago_unica) AS fecha_pago
+        FROM (
+            SELECT
+                inscripcion_id,
+                COALESCE(NULLIF(referencia_externa, ''), CONCAT('pago:', id)) AS referencia_unica,
+                MAX(monto) AS monto_unico,
+                MAX(fecha_confirmacion) AS fecha_pago_unica
+            FROM pagos
+            WHERE estado IN ('pagado','aprobado')
+            GROUP BY inscripcion_id,
+                     COALESCE(NULLIF(referencia_externa, ''), CONCAT('pago:', id))
+        ) pagos_unicos
         GROUP BY inscripcion_id
     ) pay
         ON pay.inscripcion_id = i.id
@@ -5181,7 +5455,14 @@ def exportar_excel(evento_id):
         if estado == "pagado":
 
             query += """
-                AND i.estado_pago = 'pagado'
+                AND (
+                    i.estado_pago IN ('pagado','aprobado')
+                    OR EXISTS (
+                        SELECT 1 FROM pagos pago_ok
+                        WHERE pago_ok.inscripcion_id = i.id
+                          AND pago_ok.estado IN ('aprobado','pagado')
+                    )
+                )
             """
 
         else:
@@ -5616,7 +5897,12 @@ def exportar_seguro(evento_id):
         p.genero,
         p.ciudad,
         d.nombre AS distancia,
-        i.estado_pago
+        i.estado_pago,
+        EXISTS (
+            SELECT 1 FROM pagos pay
+            WHERE pay.inscripcion_id = i.id
+              AND pay.estado IN ('aprobado','pagado')
+        ) AS pago_confirmado
     FROM inscripciones i
     JOIN personas p ON p.id = i.persona_id
     JOIN distancias d ON d.id = i.distancia_id
@@ -5644,8 +5930,9 @@ def exportar_seguro(evento_id):
         "Edad",
         "Género",
         "Ciudad",
-        "Distancia"
-        "estado pago"
+        "Distancia",
+        "Estado inscripción",
+        "Pago confirmado"
     ])
 
     from datetime import date
@@ -5669,7 +5956,8 @@ def exportar_seguro(evento_id):
             d["genero"] or "",
             d["ciudad"] or "",
             d["distancia"],
-            d["estado_pago"]
+            d["estado_pago"],
+            "Sí" if d["pago_confirmado"] else "No"
         ])
 
     # guardar en memoria
