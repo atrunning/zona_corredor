@@ -1,5 +1,6 @@
 from flask import Flask, request
 from db import get_db_connection
+from cupones import reservar_uso_cupon
 from stock_remeras import (
     contar_seleccionados,
     consultar_stock_talles,
@@ -3483,7 +3484,6 @@ def inscribirse(evento_id):
                     VALUES (%s,1,1)
                 """, (team_nuevo.upper(),))
 
-                conn.commit()
                 team_id = cursor.lastrowid
 
         # validar email
@@ -3522,7 +3522,6 @@ def inscribirse(evento_id):
                 facebook
             ))
 
-            conn.commit()
             persona_id = cursor.lastrowid
 
         else:
@@ -3562,8 +3561,6 @@ def inscribirse(evento_id):
             persona_id
             ))
 
-        conn.commit()
-
         # ==========================
         # PARTICIPANTE 2
         # ==========================
@@ -3593,8 +3590,6 @@ def inscribirse(evento_id):
                     fecha_nacimiento2,
                     genero2
                 ))
-
-                conn.commit()
 
                 persona2_id = cursor.lastrowid
 
@@ -3677,23 +3672,6 @@ def inscribirse(evento_id):
 
         cupon_id = None
 
-        if cupon:
-
-            cursor.execute("""
-            SELECT id
-            FROM cupones
-            WHERE evento_id = %s
-            AND clave = %s
-            AND activo = 1
-            AND CURDATE() BETWEEN fecha_desde AND fecha_hasta
-            LIMIT 1
-            """, (evento_id, cupon))
-
-            cup = cursor.fetchone()
-
-            if cup:
-                cupon_id = cup["id"]
-
         
         # -----------------------------
         # insertar inscripción
@@ -3721,6 +3699,16 @@ def inscribirse(evento_id):
                 <p>Volvé al formulario y seleccioná talles con stock.</p>
                 <button onclick="history.back()">Volver</button>
                 """
+
+        if cupon:
+            cupon_id, error_cupon = reservar_uso_cupon(
+                cursor, evento_id, cupon
+            )
+            if error_cupon == "agotado":
+                conn.rollback()
+                cursor.close()
+                conn.close()
+                return "<h2>Este cupón alcanzó el máximo de usos.</h2>"
 
         fecha_inscripcion = datetime.now(ZoneInfo("America/Argentina/Buenos_Aires")).strftime("%Y-%m-%d %H:%M:%S")
 

@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify, redirect
 from db import get_db_connection
+from cupones import CONDICION_USO_CUPON, reservar_uso_cupon
 from layout import layout
 import os
 from werkzeug.utils import secure_filename
@@ -893,22 +894,17 @@ def inscripcion_manual(evento_id):
 
         cupon_id = None
 
-        codigo_cupon = request.form.get("cupon")
+        codigo_cupon = (request.form.get("cupon") or "").strip().upper()
 
         if codigo_cupon:
-
-            cursor.execute("""
-            SELECT id
-            FROM cupones
-            WHERE clave = %s
-            AND activo = 1
-            AND CURDATE() BETWEEN fecha_desde AND fecha_hasta
-            """, (codigo_cupon,))
-
-            cup = cursor.fetchone()
-
-            if cup:
-                cupon_id = cup["id"]
+            cupon_id, error_cupon = reservar_uso_cupon(
+                cursor, evento_id, codigo_cupon
+            )
+            if error_cupon == "agotado":
+                conn.rollback()
+                cursor.close()
+                conn.close()
+                return "<h2>Este cupón alcanzó el máximo de usos.</h2>"
         # Crear inscripción SIN numero primero
         cursor.execute("""
         INSERT INTO inscripciones
@@ -1412,6 +1408,26 @@ def talles_form(evento_id):
         </tr>
         """
 
+    if not remeras:
+        salida += """
+        <tr>
+            <td align="center">
+                <input type="checkbox" checked disabled>
+            </td>
+            <td>
+                <input type="text" name="nuevo_talle[]" style="width:80px"
+                       placeholder="XS, S, M..." required>
+            </td>
+            <td>
+                <input type="number" name="nuevo_stock[]" value="0" min="0"
+                       style="width:70px" required>
+            </td>
+            <td align="center">0</td>
+            <td align="center">0</td>
+            <td align="center">Primer talle</td>
+        </tr>
+        """
+
     salida += """
     </table>
 
@@ -1429,48 +1445,6 @@ def talles_form(evento_id):
 
     </form>
 
-    <script>
-
-    fila.innerHTML = `
-        <td align="center">
-            <input
-                type="checkbox"
-                checked
-                disabled>
-        </td>
-
-        <td>
-            <input
-                type="text"
-                name="nuevo_talle[]"
-                style="width:80px"
-                required>
-        </td>
-
-        <td>
-            <input
-                type="number"
-                name="nuevo_stock[]"
-                value="0"
-                min="0"
-                style="width:70px">
-        </td>
-
-        <td align="center">0</td>
-
-        <td align="center">0</td>
-
-        <td align="center">
-            <button
-                type="button"
-                onclick="eliminarFila(this)">
-                🗑️
-            </button>
-        </td>
-    `;
-    }
-    
-    </script>
     <script>
 
     function agregarTalle(){
@@ -4946,11 +4920,18 @@ def pantalla_cupones(evento_id):
     cursor = conn.cursor(dictionary=True)
 
     cursor.execute("""
-        SELECT *
-        FROM cupones
-        WHERE evento_id=%s
-        ORDER BY clave
-    """, (evento_id,))
+        SELECT
+            c.*,
+            (
+                SELECT COUNT(*)
+                FROM inscripciones i
+                WHERE i.cupon_id = c.id
+                  AND {condicion_uso}
+            ) AS usos
+        FROM cupones c
+        WHERE c.evento_id=%s
+        ORDER BY c.clave
+    """.format(condicion_uso=CONDICION_USO_CUPON), (evento_id,))
 
     cupones = cursor.fetchall()
 
