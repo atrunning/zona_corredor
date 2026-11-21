@@ -2691,10 +2691,10 @@ def editar_campo(campo_id):
     return layout(salida)
 @organizador_bp.route("/inscripcion/<numero>", methods=["GET","POST"])
 def editar_inscripcion(numero):
-    
+
     salida = ""
     tab = request.args.get("tab", "resumen")
-    
+
     mensaje = ""
     if request.args.get("ok"):
         mensaje = """
@@ -2711,406 +2711,713 @@ def editar_inscripcion(numero):
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
+    def cerrar_recursos_edicion():
+        import logging
+
+        try:
+            cursor.close()
+        except Exception:
+            logging.exception("No se pudo cerrar el cursor de edición")
+        try:
+            conn.close()
+        except Exception:
+            logging.exception("No se pudo cerrar la conexión de edición")
+
     # -------------------------
     # GUARDAR CAMBIOS
     # -------------------------
     if request.method == "POST":
+        try:
 
-        accion = request.form.get("accion")
+            accion = request.form.get("accion")
 
-        if accion == "marcar_pagado":
+            if accion == "marcar_pagado":
+                cursor.execute("""
+                    SELECT i.id, i.evento_id, i.estado_pago, d.incluye_remera
+                    FROM inscripciones i
+                    JOIN distancias d ON d.id = i.distancia_id
+                    WHERE i.numero_inscripcion = %s
+                """, (numero,))
+                pago_inscripcion = cursor.fetchone()
+                if not pago_inscripcion:
+                    cursor.close()
+                    conn.close()
+                    return "Inscripción no encontrada"
+
+                if pago_inscripcion["incluye_remera"]:
+                    talles = obtener_talles_inscripcion(cursor, pago_inscripcion["id"])
+                    disponible, _motivo = validar_stock_talles(
+                        cursor,
+                        pago_inscripcion["evento_id"],
+                        talles,
+                        excluir_inscripcion_id=pago_inscripcion["id"],
+                        permitir_inactivos=contar_seleccionados(talles),
+                    ) if talles else (False, "sin_configuracion")
+                    if not disponible:
+                        conn.rollback()
+                        cursor.close()
+                        conn.close()
+                        return """
+                        <h2>No hay stock suficiente para confirmar esta inscripción.</h2>
+                        <p>El talle existente se conserva; verificá el stock antes de marcar el pago.</p>
+                        """
+
+                cursor.execute("""
+                UPDATE inscripciones
+                SET estado_pago = 'pagado'
+                WHERE numero_inscripcion = %s
+                """, (numero,))
+
+
+                conn.commit()
+
+                cerrar_recursos_edicion()
+
+                return redirect(f"/inscripcion/{numero}?ok=1")
+
+            # -------------------------
+            # REGISTRAR PAGO MANUAL
+            # -------------------------
+
+
+            nombre = request.form["nombre"]
+            apellido = request.form["apellido"]
+            dni = request.form["dni"]
+            email = request.form["email"]
+            celular = request.form.get("celular")
+            ciudad = request.form.get("ciudad")
+            fecha_nac = request.form.get("fecha_nac") or None
+            instagram = request.form.get("instagram")
+            facebook = request.form.get("facebook")
+            strava = request.form.get("strava")
+            genero = request.form.get("genero")
+            talle = request.form.get("talle_remera")
+            team_id = request.form.get("team_id")
+
+            if not team_id or team_id == "None":
+                team_id = None
+            else:
+                team_id = int(team_id)
+            team_nombre = request.form.get("team_input","").strip().upper()
+
+            team_nombre = " ".join(team_nombre.split())
+            dorsal = request.form.get("dorsal") or None
+            distancia_id = request.form.get("distancia_id")
+
             cursor.execute("""
-                SELECT i.id, i.evento_id, i.estado_pago, d.incluye_remera
-                FROM inscripciones i
-                JOIN distancias d ON d.id = i.distancia_id
-                WHERE i.numero_inscripcion = %s
+            SELECT id, evento_id, persona_id, distancia_id, estado_pago,
+                   fecha_inscripcion, talle_remera
+            FROM inscripciones
+            WHERE numero_inscripcion = %s
+            FOR UPDATE
             """, (numero,))
-            pago_inscripcion = cursor.fetchone()
-            if not pago_inscripcion:
+
+            ins = cursor.fetchone()
+
+            evento_id = ins["evento_id"]
+            inscripcion_id = ins["id"]
+            distancia_anterior = ins["distancia_id"]
+            estado_pago = ins["estado_pago"]
+
+            # -------------------------
+            # CARGAR PARTICIPANTES INSCRIPCIÓN
+            # -------------------------
+
+            cursor.execute("""
+            SELECT
+                ip.orden,
+                ip.persona_id,
+                ip.talle_remera,
+                p.nombre,
+                p.apellido,
+                p.dni,
+                p.fecha_nac,
+                p.genero
+            FROM inscripcion_participantes ip
+            JOIN personas p ON p.id = ip.persona_id
+            WHERE ip.inscripcion_id = %s
+            ORDER BY ip.orden
+            """, (inscripcion_id,))
+
+            participantes_inscripcion = cursor.fetchall()
+
+            talles_adicionales = []
+
+            if not distancia_id:
+                distancia_id = ins["distancia_id"]
+
+            cursor.execute("""
+                SELECT incluye_remera, participantes_por_inscripcion, activo
+                FROM distancias
+                WHERE id = %s AND evento_id = %s
+                  AND (activo = 1 OR id = %s)
+            """, (distancia_id, evento_id, ins["distancia_id"]))
+            distancia_seleccionada = cursor.fetchone()
+            if not distancia_seleccionada:
+                conn.rollback()
                 cursor.close()
                 conn.close()
-                return "Inscripción no encontrada"
+                return "La distancia seleccionada no está disponible."
 
-            if pago_inscripcion["incluye_remera"]:
-                talles = obtener_talles_inscripcion(cursor, pago_inscripcion["id"])
-                disponible, _motivo = validar_stock_talles(
-                    cursor,
-                    pago_inscripcion["evento_id"],
-                    talles,
-                    excluir_inscripcion_id=pago_inscripcion["id"],
-                    permitir_inactivos=contar_seleccionados(talles),
-                ) if talles else (False, "sin_configuracion")
-                if not disponible:
+            participantes_requeridos = int(
+                distancia_seleccionada.get("participantes_por_inscripcion") or 1
+            )
+            requiere_segundo = participantes_requeridos >= 2
+            incluye_remera_seleccionada = bool(
+                distancia_seleccionada.get("incluye_remera")
+            )
+
+            participante2_form = None
+            persona2_existente = None
+            persona2_cambios_datos = False
+
+            def normalizar_valor_persona(valor):
+                if hasattr(valor, "strftime"):
+                    return valor.strftime("%Y-%m-%d")
+                return "" if valor is None else str(valor).strip()
+
+            if requiere_segundo:
+                import re
+
+                dni_principal = re.sub(r"\D", "", (dni or ""))
+                dni2 = re.sub(
+                    r"\D", "", request.form.get("participante_dni_2", "") or ""
+                )
+                nombre2 = (request.form.get("participante_nombre_2") or "").strip().upper()
+                apellido2 = (request.form.get("participante_apellido_2") or "").strip().upper()
+                genero2 = (request.form.get("participante_genero_2") or "").strip().upper()
+                fecha_nac2_texto = (
+                    request.form.get("participante_fecha_nac_2") or ""
+                ).strip()
+                talle2 = (
+                    request.form.get("participante_talle_remera_2") or ""
+                ).strip() or None
+
+                if dni2 == dni_principal:
                     conn.rollback()
                     cursor.close()
                     conn.close()
-                    return """
-                    <h2>No hay stock suficiente para confirmar esta inscripción.</h2>
-                    <p>El talle existente se conserva; verificá el stock antes de marcar el pago.</p>
-                    """
+                    return "El DNI del participante 2 debe ser distinto al del participante 1."
+                if not dni2.isdigit() or not 7 <= len(dni2) <= 8:
+                    conn.rollback()
+                    cursor.close()
+                    conn.close()
+                    return "Ingresá un DNI válido para el participante 2."
+                if not nombre2 or not apellido2 or genero2 not in ("M", "F"):
+                    conn.rollback()
+                    cursor.close()
+                    conn.close()
+                    return "Completá nombre, apellido y género del participante 2."
+                try:
+                    fecha_nac2 = datetime.strptime(
+                        fecha_nac2_texto, "%Y-%m-%d"
+                    ).date()
+                except (TypeError, ValueError):
+                    conn.rollback()
+                    cursor.close()
+                    conn.close()
+                    return "Ingresá una fecha de nacimiento válida para el participante 2."
+                if incluye_remera_seleccionada and not talle2:
+                    conn.rollback()
+                    cursor.close()
+                    conn.close()
+                    return "Seleccioná el talle de remera del participante 2."
 
-            cursor.execute("""
-            UPDATE inscripciones
-            SET estado_pago = 'pagado'
-            WHERE numero_inscripcion = %s
-            """, (numero,))
+                cursor.execute("""
+                    SELECT id, nombre, apellido, dni, fecha_nac, genero
+                    FROM personas
+                    WHERE dni = %s
+                    LIMIT 1
+                    FOR UPDATE
+                """, (dni2,))
+                persona2_existente = cursor.fetchone()
+                if persona2_existente:
+                    if persona2_existente["id"] == ins["persona_id"]:
+                        conn.rollback()
+                        cursor.close()
+                        conn.close()
+                        return "El DNI del participante 2 debe corresponder a otra persona."
+                    cursor.execute("""
+                        SELECT COUNT(DISTINCT i.id) AS total
+                        FROM inscripciones i
+                        LEFT JOIN inscripcion_participantes ip
+                          ON ip.inscripcion_id = i.id
+                        WHERE i.id <> %s
+                          AND (i.persona_id = %s OR ip.persona_id = %s)
+                    """, (
+                        inscripcion_id,
+                        persona2_existente["id"],
+                        persona2_existente["id"],
+                    ))
+                    persona2_compartida = cursor.fetchone()["total"] > 0
+                    cambios_persona2 = any(
+                        normalizar_valor_persona(persona2_existente.get(campo))
+                        != normalizar_valor_persona(valor)
+                        for campo, valor in {
+                            "nombre": nombre2,
+                            "apellido": apellido2,
+                            "fecha_nac": fecha_nac2,
+                            "genero": genero2,
+                        }.items()
+                    )
+                    persona2_cambios_datos = cambios_persona2
+                    if persona2_compartida and cambios_persona2:
+                        conn.rollback()
+                        cursor.close()
+                        conn.close()
+                        return (
+                            "El participante 2 ya está vinculado a otras "
+                            "inscripciones; no se modificaron sus datos personales."
+                        )
+                participante2_form = {
+                    "dni": dni2,
+                    "nombre": nombre2,
+                    "apellido": apellido2,
+                    "genero": genero2,
+                    "fecha_nac": fecha_nac2,
+                    "talle_remera": talle2 if incluye_remera_seleccionada else None,
+                }
 
+            team_id = request.form.get("team_id")
+            team_nombre = request.form.get("team_input","").strip().upper()
 
-            conn.commit()
-
-            cursor.close()
-            conn.close()
-
-            return redirect(f"/inscripcion/{numero}?ok=1")
-
-        # -------------------------
-        # REGISTRAR PAGO MANUAL
-        # -------------------------
-             
-
-        nombre = request.form["nombre"]
-        apellido = request.form["apellido"]
-        dni = request.form["dni"]
-        email = request.form["email"]
-        celular = request.form.get("celular")
-        ciudad = request.form.get("ciudad")
-        fecha_nac = request.form.get("fecha_nac") or None
-        instagram = request.form.get("instagram")
-        facebook = request.form.get("facebook")
-        strava = request.form.get("strava")
-        genero = request.form.get("genero")
-        talle = request.form.get("talle_remera")
-        team_id = request.form.get("team_id")
-
-        if not team_id or team_id == "None":
-            team_id = None
-        else:
-            team_id = int(team_id)
-        team_nombre = request.form.get("team_input","").strip().upper()
-        
-        team_nombre = " ".join(team_nombre.split())
-        dorsal = request.form.get("dorsal") or None
-        distancia_id = request.form.get("distancia_id")
-
-        cursor.execute("""
-        SELECT id, evento_id, distancia_id, estado_pago, fecha_inscripcion,
-               talle_remera
-        FROM inscripciones
-        WHERE numero_inscripcion = %s
-        """, (numero,))
-
-        ins = cursor.fetchone()
-
-        evento_id = ins["evento_id"]
-        inscripcion_id = ins["id"]
-        distancia_anterior = ins["distancia_id"]
-        estado_pago = ins["estado_pago"]
-
-        # -------------------------
-        # CARGAR PARTICIPANTES INSCRIPCIÓN
-        # -------------------------
-
-        cursor.execute("""
-        SELECT
-            ip.orden,
-            ip.persona_id,
-            ip.talle_remera,
-            p.nombre,
-            p.apellido,
-            p.dni,
-            p.fecha_nac,
-            p.genero
-        FROM inscripcion_participantes ip
-        JOIN personas p ON p.id = ip.persona_id
-        WHERE ip.inscripcion_id = %s
-        ORDER BY ip.orden
-        """, (inscripcion_id,))
-
-        participantes_inscripcion = cursor.fetchall()
-
-        talles_adicionales = []
-
-        if not distancia_id:
-            distancia_id = ins["distancia_id"]
-        
-        team_id = request.form.get("team_id")
-        team_nombre = request.form.get("team_input","").strip().upper()
-
-        # normalizar
-        if team_id in ["", "None", None]:
-            team_id = None
-        else:
-            team_id = int(team_id)
-
-        team_nombre = " ".join(team_nombre.split())
-
-        # si no hay ID pero hay nombre → buscar o crear
-        if not team_id and team_nombre:
-
-            cursor.execute(
-                "SELECT id FROM teams WHERE nombre=%s",
-                (team_nombre,)
-            )
-            t = cursor.fetchone()
-
-            if t:
-                team_id = t["id"]
+            # normalizar
+            if team_id in ["", "None", None]:
+                team_id = None
             else:
+                team_id = int(team_id)
+
+            team_nombre = " ".join(team_nombre.split())
+
+            # si no hay ID pero hay nombre → buscar o crear
+            if not team_id and team_nombre:
+
                 cursor.execute(
-                    "INSERT INTO teams (nombre,organizador_id) VALUES (%s,%s)",
-                    (team_nombre,1)
+                    "SELECT id FROM teams WHERE nombre=%s",
+                    (team_nombre,)
                 )
-                team_id = cursor.lastrowid
+                t = cursor.fetchone()
 
-        
-        cursor.execute("""
-        UPDATE personas
-        SET nombre=%s,
-            apellido=%s,
-            dni=%s,
-            email=%s,
-            celular=%s,
-            ciudad=%s,
-            instagram=%s,
-            facebook=%s,
-            strava=%s,
-            fecha_nac=%s,
-            genero=%s,
-            team_id=%s
-        WHERE id = (
-            SELECT persona_id
-            FROM inscripciones
-            WHERE numero_inscripcion=%s
-        )
-        """,(
-            nombre,apellido,dni,email,celular,ciudad,
-            instagram,facebook,strava,fecha_nac,
-            genero,team_id,numero
-        ))
+                if t:
+                    team_id = t["id"]
+                else:
+                    cursor.execute(
+                        "INSERT INTO teams (nombre,organizador_id) VALUES (%s,%s)",
+                        (team_nombre,1)
+                    )
+                    team_id = cursor.lastrowid
 
-        # -------------------------
-        # GUARDAR PARTICIPANTES ADICIONALES
-        # -------------------------
+            # No modificar la ficha global de una persona si comparte otras
+            # inscripciones y el formulario intenta cambiar sus datos.
+            principal_compartido = False
+            cursor.execute("""
+                SELECT nombre, apellido, dni, email, celular, ciudad, instagram,
+                       facebook, strava, fecha_nac, genero, team_id
+                FROM personas
+                WHERE id = %s
+                FOR UPDATE
+            """, (ins["persona_id"],))
+            persona_principal_actual = cursor.fetchone()
+            if persona_principal_actual:
+                datos_principales_nuevos = {
+                    "nombre": nombre,
+                    "apellido": apellido,
+                    "dni": dni,
+                    "email": email,
+                    "celular": celular,
+                    "ciudad": ciudad,
+                    "instagram": instagram,
+                    "facebook": facebook,
+                    "strava": strava,
+                    "fecha_nac": fecha_nac,
+                    "genero": genero,
+                    "team_id": team_id,
+                }
 
-        for participante in participantes_inscripcion[1:]:
+                cambio_datos_principal = any(
+                    normalizar_valor_persona(persona_principal_actual.get(campo))
+                    != normalizar_valor_persona(valor)
+                    for campo, valor in datos_principales_nuevos.items()
+                )
+                cursor.execute("""
+                    SELECT COUNT(DISTINCT i.id) AS total
+                    FROM inscripciones i
+                    LEFT JOIN inscripcion_participantes ip
+                      ON ip.inscripcion_id = i.id
+                    WHERE i.id <> %s
+                      AND (i.persona_id = %s OR ip.persona_id = %s)
+                """, (inscripcion_id, ins["persona_id"], ins["persona_id"]))
+                principal_compartido = cursor.fetchone()["total"] > 0
+                if principal_compartido and cambio_datos_principal:
+                    conn.rollback()
+                    cursor.close()
+                    conn.close()
+                    return (
+                        "No se pueden cambiar los datos personales de este corredor "
+                        "desde una inscripción compartida."
+                    )
 
-            orden = participante["orden"]
-
-            persona_id = request.form.get(
-                f"participante_id_{orden}"
-            )
-
-            nombre_participante = request.form.get(
-                f"participante_nombre_{orden}", ""
-            ).strip().upper()
-
-            apellido_participante = request.form.get(
-                f"participante_apellido_{orden}", ""
-            ).strip().upper()
-
-            dni_participante = request.form.get(
-                f"participante_dni_{orden}", ""
-            ).strip()
-
-            genero_participante = request.form.get(
-                f"participante_genero_{orden}"
-            )
-
-            fecha_nac_participante = request.form.get(
-                f"participante_fecha_nac_{orden}"
-            ) or None
-
-            talle_participante = request.form.get(
-                f"participante_talle_remera_{orden}"
-            )
-            talles_adicionales.append((orden, talle_participante))
-
-            # -------------------------
-            # ACTUALIZAR DATOS PERSONALES
-            # -------------------------
-
-            if persona_id:
-
+            if not principal_compartido:
                 cursor.execute("""
                 UPDATE personas
                 SET nombre=%s,
                     apellido=%s,
                     dni=%s,
+                    email=%s,
+                    celular=%s,
+                    ciudad=%s,
+                    instagram=%s,
+                    facebook=%s,
+                    strava=%s,
                     fecha_nac=%s,
-                    genero=%s
-                WHERE id=%s
-                """, (
-                    nombre_participante,
-                    apellido_participante,
-                    dni_participante,
-                    fecha_nac_participante,
-                    genero_participante,
-                    persona_id
-                ))
-
-        # Validar cambios de talle hechos desde la edición del organizador.
-        cursor.execute("""
-            SELECT incluye_remera
-            FROM distancias
-            WHERE id = %s AND evento_id = %s
-        """, (distancia_id, evento_id))
-        distancia_remera = cursor.fetchone()
-        if distancia_remera and distancia_remera["incluye_remera"]:
-            talles_nuevos = [talle] + [t for _, t in talles_adicionales]
-            if any(not (t or "").strip() for t in talles_nuevos):
-                conn.rollback()
-                cursor.close()
-                conn.close()
-                return "<h2>Seleccioná un talle para cada participante.</h2>"
-
-            talles_anteriores = obtener_talles_inscripcion(cursor, inscripcion_id)
-            disponible, motivo = validar_cambio_stock_talles(
-                cursor,
-                evento_id,
-                talles_nuevos,
-                talles_anteriores,
-                excluir_inscripcion_id=inscripcion_id,
-            )
-            if not disponible:
-                conn.rollback()
-                cursor.close()
-                conn.close()
-                mensaje = (
-                    "El talle está desactivado para asignaciones nuevas."
-                    if motivo == "inactivo"
-                    else "No hay stock suficiente para esos talles."
+                    genero=%s,
+                    team_id=%s
+                WHERE id = (
+                    SELECT persona_id
+                    FROM inscripciones
+                    WHERE numero_inscripcion=%s
                 )
-                return f"<h2>{mensaje}</h2>"
-
-        elif distancia_remera:
-            talle = None
-            talles_adicionales = [
-                (orden, None) for orden, _ in talles_adicionales
-            ]
-
-        for orden, talle_participante in talles_adicionales:
-            guardar_talle_participante(
-                cursor, inscripcion_id, orden, talle_participante
-            )
-
-        # -------------------------
-        # VALIDAR DORSAL REPETIDO
-        # -------------------------
-        if dorsal:
-            cursor.execute("""
-                SELECT numero_inscripcion
-                FROM inscripciones
-                WHERE evento_id = %s
-                AND dorsal = %s
-                AND numero_inscripcion <> %s
-            """, (evento_id, dorsal, numero))
-
-            existe = cursor.fetchone()
-
-            
-
-            if existe:
-                conn.rollback()
-                cursor.close()
-                conn.close()
-                return f"""
-                <script>
-                alert("El dorsal {dorsal} ya está asignado en este evento.");
-                history.back();
-                </script>
-                """
-
-        cursor.execute("""
-        UPDATE inscripciones
-        SET dorsal=%s,
-            distancia_id=%s,
-            talle_remera=%s
-        WHERE numero_inscripcion=%s
-        """, (dorsal, distancia_id, talle, numero))
-
-        cursor.execute("""
-            UPDATE inscripcion_participantes
-            SET talle_remera = %s
-            WHERE inscripcion_id = %s AND orden = 1
-        """, (talle, inscripcion_id))
-
-        # ---------------------------------
-        # SI CAMBIÓ DISTANCIA
-        # ---------------------------------
-
-        if str(distancia_anterior) != str(distancia_id):
-
-            # solo si está pendiente
-            if estado_pago == "pendiente":
-
-                # traer nuevo precio
-                cursor.execute("""
-                SELECT precio
-                FROM distancias
-                WHERE id = %s
-                """, (distancia_id,))
-
-                nueva_distancia = cursor.fetchone()
-
-                nuevo_precio = nueva_distancia["precio"]
-
-                # actualizar pago pendiente
-                cursor.execute("""
-                UPDATE pagos
-                SET monto = %s
-                WHERE inscripcion_id = %s
-                AND estado = 'pendiente'
-                """, (
-                    nuevo_precio,
-                    inscripcion_id
+                """,(
+                    nombre,apellido,dni,email,celular,ciudad,
+                    instagram,facebook,strava,fecha_nac,
+                    genero,team_id,numero
                 ))
 
-        # -------------------------
-        # RECARGAR CAMPOS EXTRA
-        # -------------------------
+            # -------------------------
+            # GUARDAR PARTICIPANTES ADICIONALES
+            # -------------------------
 
-        cursor.execute("""
-        SELECT *
-        FROM distancia_campos
-        WHERE distancia_id = %s
-        ORDER BY id
-        """, (distancia_id,))
+            for participante in participantes_inscripcion:
 
-        campos_extra = cursor.fetchall()
+                orden = participante["orden"]
+                if orden <= 1:
+                    continue
 
-        # -------------------------
-        # GUARDAR CAMPOS EXTRA
-        # -------------------------
+                if orden == 2:
+                    # La persona y la relación del segundo corredor se resuelven
+                    # por DNI más abajo, incluso si todavía no existe la fila.
+                    # Si la distancia seleccionada es individual, la relación
+                    # se elimina más adelante, después de superar las validaciones.
+                    if requiere_segundo:
+                        talles_adicionales.append(
+                            (orden, participante2_form["talle_remera"])
+                        )
+                    continue
 
-        cursor.execute("""
-        DELETE FROM inscripcion_respuestas
-        WHERE inscripcion_id = %s
-        """, (inscripcion_id,))
+                if not requiere_segundo:
+                    # Al pasar a individual se conserva el registro histórico del
+                    # participante adicional, pero deja de comprometer remera.
+                    talles_adicionales.append((orden, None))
+                    continue
 
-        for campo in campos_extra:
+                persona_id = request.form.get(
+                    f"participante_id_{orden}"
+                )
 
-            
-            valor = request.form.get(f"campo_{campo['id']}", "")
+                nombre_participante = request.form.get(
+                    f"participante_nombre_{orden}", ""
+                ).strip().upper()
 
-            
+                apellido_participante = request.form.get(
+                    f"participante_apellido_{orden}", ""
+                ).strip().upper()
+
+                dni_participante = request.form.get(
+                    f"participante_dni_{orden}", ""
+                ).strip()
+
+                genero_participante = request.form.get(
+                    f"participante_genero_{orden}"
+                )
+
+                fecha_nac_participante = request.form.get(
+                    f"participante_fecha_nac_{orden}"
+                ) or None
+
+                talle_participante = request.form.get(
+                    f"participante_talle_remera_{orden}"
+                )
+                talles_adicionales.append((orden, talle_participante))
+
+                # -------------------------
+                # ACTUALIZAR DATOS PERSONALES
+                # -------------------------
+
+                if persona_id:
+
+                    cursor.execute("""
+                    UPDATE personas
+                    SET nombre=%s,
+                        apellido=%s,
+                        dni=%s,
+                        fecha_nac=%s,
+                        genero=%s
+                    WHERE id=%s
+                    """, (
+                        nombre_participante,
+                        apellido_participante,
+                        dni_participante,
+                        fecha_nac_participante,
+                        genero_participante,
+                        persona_id
+                    ))
+
+            if requiere_segundo and not any(
+                participante.get("orden") == 2
+                for participante in participantes_inscripcion
+            ):
+                talles_adicionales.append(
+                    (2, participante2_form["talle_remera"])
+                )
+
+            # Validar cambios de talle hechos desde la edición del organizador.
+            distancia_remera = distancia_seleccionada
+            if distancia_remera and distancia_remera["incluye_remera"]:
+                talles_nuevos = [talle]
+                if requiere_segundo:
+                    talles_nuevos.extend(
+                        t for _, t in talles_adicionales
+                    )
+                if any(not (t or "").strip() for t in talles_nuevos):
+                    conn.rollback()
+                    cursor.close()
+                    conn.close()
+                    return "<h2>Seleccioná un talle para cada participante.</h2>"
+
+                talles_anteriores = obtener_talles_inscripcion(cursor, inscripcion_id)
+                disponible, motivo = validar_cambio_stock_talles(
+                    cursor,
+                    evento_id,
+                    talles_nuevos,
+                    talles_anteriores,
+                    excluir_inscripcion_id=inscripcion_id,
+                )
+                if not disponible:
+                    conn.rollback()
+                    cursor.close()
+                    conn.close()
+                    mensaje = (
+                        "El talle está desactivado para asignaciones nuevas."
+                        if motivo == "inactivo"
+                        else "No hay stock suficiente para esos talles."
+                    )
+                    return f"<h2>{mensaje}</h2>"
+
+            elif distancia_remera:
+                talle = None
+                talles_adicionales = [
+                    (orden, None) for orden, _ in talles_adicionales
+                ]
+
+            if requiere_segundo:
+                if persona2_existente:
+                    persona2_id = persona2_existente["id"]
+                    if persona2_cambios_datos:
+                        cursor.execute("""
+                            UPDATE personas
+                            SET nombre = %s,
+                                apellido = %s,
+                                fecha_nac = %s,
+                                genero = %s
+                            WHERE id = %s
+                        """, (
+                            participante2_form["nombre"],
+                            participante2_form["apellido"],
+                            participante2_form["fecha_nac"],
+                            participante2_form["genero"],
+                            persona2_id,
+                        ))
+                else:
+                    cursor.execute("""
+                        INSERT INTO personas
+                            (dni, nombre, apellido, fecha_nac, genero)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, (
+                        participante2_form["dni"],
+                        participante2_form["nombre"],
+                        participante2_form["apellido"],
+                        participante2_form["fecha_nac"],
+                        participante2_form["genero"],
+                    ))
+                    persona2_id = cursor.lastrowid
+
+                cursor.execute("""
+                    SELECT id
+                    FROM inscripcion_participantes
+                    WHERE inscripcion_id = %s AND orden = 2
+                    FOR UPDATE
+                """, (inscripcion_id,))
+                participante2_fila = cursor.fetchone()
+                if participante2_fila:
+                    cursor.execute("""
+                        UPDATE inscripcion_participantes
+                        SET persona_id = %s, talle_remera = %s
+                        WHERE id = %s
+                    """, (
+                        persona2_id,
+                        participante2_form["talle_remera"],
+                        participante2_fila["id"],
+                    ))
+                else:
+                    cursor.execute("""
+                        INSERT INTO inscripcion_participantes
+                            (inscripcion_id, persona_id, orden, talle_remera)
+                        VALUES (%s, %s, 2, %s)
+                    """, (
+                        inscripcion_id,
+                        persona2_id,
+                        participante2_form["talle_remera"],
+                    ))
+
+            for orden, talle_participante in talles_adicionales:
+                if orden == 2 and requiere_segundo:
+                    continue
+                guardar_talle_participante(
+                    cursor, inscripcion_id, orden, talle_participante
+                )
+
+            # -------------------------
+            # VALIDAR DORSAL REPETIDO
+            # -------------------------
+            if dorsal:
+                cursor.execute("""
+                    SELECT numero_inscripcion
+                    FROM inscripciones
+                    WHERE evento_id = %s
+                    AND dorsal = %s
+                    AND numero_inscripcion <> %s
+                """, (evento_id, dorsal, numero))
+
+                existe = cursor.fetchone()
+
+
+
+                if existe:
+                    conn.rollback()
+                    cursor.close()
+                    conn.close()
+                    return f"""
+                    <script>
+                    alert("El dorsal {dorsal} ya está asignado en este evento.");
+                    history.back();
+                    </script>
+                    """
 
             cursor.execute("""
-            INSERT INTO inscripcion_respuestas
-            (inscripcion_id, campo_id, valor)
-            VALUES (%s,%s,%s)
-            """, (
-                inscripcion_id,
-                campo["id"],
-                valor
-            ))
+            UPDATE inscripciones
+            SET dorsal=%s,
+                distancia_id=%s,
+                talle_remera=%s
+            WHERE numero_inscripcion=%s
+            """, (dorsal, distancia_id, talle, numero))
 
-        conn.commit()
+            cursor.execute("""
+                UPDATE inscripcion_participantes
+                SET talle_remera = %s
+                WHERE inscripcion_id = %s AND orden = 1
+            """, (talle, inscripcion_id))
 
-        tab = request.args.get("tab") or request.form.get("tab") or "resumen"
+            # ---------------------------------
+            # SI CAMBIÓ DISTANCIA
+            # ---------------------------------
 
-        return redirect(f"/inscripcion/{numero}?ok=1&tab={tab}")
-            
-    # -------------------------
+            if str(distancia_anterior) != str(distancia_id):
+
+                # solo si está pendiente
+                if estado_pago == "pendiente":
+
+                    # traer nuevo precio
+                    cursor.execute("""
+                    SELECT precio
+                    FROM distancias
+                    WHERE id = %s
+                    """, (distancia_id,))
+
+                    nueva_distancia = cursor.fetchone()
+
+                    nuevo_precio = nueva_distancia["precio"]
+
+                    # actualizar pago pendiente
+                    cursor.execute("""
+                    UPDATE pagos
+                    SET monto = %s
+                    WHERE inscripcion_id = %s
+                    AND estado = 'pendiente'
+                    """, (
+                        nuevo_precio,
+                        inscripcion_id
+                    ))
+
+            # -------------------------
+            # RECARGAR CAMPOS EXTRA
+            # -------------------------
+
+            cursor.execute("""
+            SELECT *
+            FROM distancia_campos
+            WHERE distancia_id = %s
+            ORDER BY id
+            """, (distancia_id,))
+
+            campos_extra = cursor.fetchall()
+
+            # -------------------------
+            # GUARDAR CAMPOS EXTRA
+            # -------------------------
+
+            cursor.execute("""
+            DELETE FROM inscripcion_respuestas
+            WHERE inscripcion_id = %s
+            """, (inscripcion_id,))
+
+            for campo in campos_extra:
+
+
+                valor = request.form.get(f"campo_{campo['id']}", "")
+
+
+
+                cursor.execute("""
+                INSERT INTO inscripcion_respuestas
+                (inscripcion_id, campo_id, valor)
+                VALUES (%s,%s,%s)
+                """, (
+                    inscripcion_id,
+                    campo["id"],
+                    valor
+                ))
+
+            # Al convertir una posta a individual, eliminar solo la relación del
+            # participante 2. La persona permanece intacta en personas y el
+            # participante 1, la inscripción y sus pagos no se alteran. Esto se
+            # ejecuta dentro de la transacción y después de las validaciones.
+            if not requiere_segundo and any(
+                participante.get("orden") == 2
+                for participante in participantes_inscripcion
+            ):
+                cursor.execute("""
+                    DELETE FROM inscripcion_participantes
+                    WHERE inscripcion_id = %s AND orden = 2
+                """, (inscripcion_id,))
+
+            conn.commit()
+
+            tab = request.args.get("tab") or request.form.get("tab") or "resumen"
+            cerrar_recursos_edicion()
+
+            return redirect(f"/inscripcion/{numero}?ok=1&tab={tab}")
+
+        # -------------------------
+
+        except Exception:
+            import logging
+            logging.exception("Error al guardar la inscripción %s", numero)
+            try:
+                conn.rollback()
+            except Exception:
+                logging.exception("No se pudo revertir la edición de la inscripción %s", numero)
+            cerrar_recursos_edicion()
+            return "<h2>No se pudieron guardar los cambios. Intentá nuevamente; si el problema continúa, contactá al administrador.</h2>"
     # CARGAR DATOS INSCRIPCION
     # -------------------------
     cursor.execute("""
@@ -3149,7 +3456,7 @@ def editar_inscripcion(numero):
     ins = cursor.fetchone()
     evento_id = ins["evento_id"]
 
-    
+
     inscripcion_id = ins["id"]
 
     # -------------------------
@@ -3180,19 +3487,43 @@ def editar_inscripcion(numero):
     talle_principal_actual = normalizar_talle(
         (participante_principal or {}).get("talle_remera")
     ) or normalizar_talle(ins.get("talle_remera"))
-    
+
     if ins and ins.get("fecha_nac"):
         ins["fecha_nac"] = ins["fecha_nac"].strftime("%Y-%m-%d")
-    
+
     cursor.execute("""
-    SELECT id, nombre
+    SELECT id, nombre, participantes_por_inscripcion, incluye_remera, activo
     FROM distancias
     WHERE evento_id = %s
-    AND activo = 1
+    AND (activo = 1 OR id = %s)
     ORDER BY nombre
-    """, (evento_id,))
+    """, (evento_id, ins["distancia_id"]))
 
     distancias = cursor.fetchall()
+    distancia_actual_seleccionada = next(
+        (d for d in distancias if d["id"] == ins["distancia_id"]), {}
+    )
+    participantes_adicionales_form = [
+        p for p in participantes_inscripcion if p.get("orden", 1) > 1
+    ]
+    tiene_segundo_registrado = any(
+        p.get("orden") == 2 for p in participantes_adicionales_form
+    )
+    hay_modalidad_dos = any(
+        int(d.get("participantes_por_inscripcion") or 1) >= 2
+        for d in distancias
+    )
+    if hay_modalidad_dos and not tiene_segundo_registrado:
+        participantes_adicionales_form.insert(0, {
+            "orden": 2,
+            "persona_id": "",
+            "nombre": "",
+            "apellido": "",
+            "dni": "",
+            "genero": "",
+            "fecha_nac": None,
+            "talle_remera": None,
+        })
 
     # -------------------------
     # CAMPOS EXTRA DISTANCIA
@@ -3220,7 +3551,7 @@ def editar_inscripcion(numero):
 
     for r in respuestas_db:
         respuestas_extra[r["campo_id"]] = r["valor"]
-    
+
     # =========================
     # PAGOS DE LA INSCRIPCION
     # =========================
@@ -3252,7 +3583,7 @@ def editar_inscripcion(numero):
         conn.close()
         return layout("<h2>Inscripción no encontrada</h2>")
 
-    
+
 
     # -------------------------
     # CONSTRUIR LISTA TEAMS
@@ -3265,7 +3596,7 @@ def editar_inscripcion(numero):
     # -------------------------
     # HTML
     # -------------------------
-    
+
     salida += f"""
     <script>
 
@@ -3302,7 +3633,7 @@ def editar_inscripcion(numero):
 
     </script>
     """
-    
+
     salida += mensaje
 
     salida += f"""
@@ -3320,7 +3651,7 @@ def editar_inscripcion(numero):
 
     </div>
     """
-    
+
     salida += f"""
     <form method="POST">
 
@@ -3339,7 +3670,7 @@ def editar_inscripcion(numero):
     ">
     ← Volver a inscriptos
     </a>
-    
+
     <h2>Resumen</h2>
 
     Código: {ins['numero_inscripcion']}<br><br>
@@ -3363,9 +3694,16 @@ def editar_inscripcion(numero):
         if d["id"] == ins["distancia_id"]:
             selected = "selected"
 
+        nombre_distancia = d["nombre"]
+        if not d.get("activo"):
+            nombre_distancia += " (inactiva, modalidad actual)"
+
         salida += f"""
-        <option value="{d['id']}" {selected}>
-        {d['nombre']}
+        <option value="{d['id']}"
+            data-participantes="{d.get('participantes_por_inscripcion') or 1}"
+            data-incluye-remera="{1 if d.get('incluye_remera') else 0}"
+            {selected}>
+        {nombre_distancia}
         </option>
         """
     salida += """
@@ -3458,7 +3796,7 @@ def editar_inscripcion(numero):
     Team: {ins.get('team','-')}<br>
 
     {html_participantes}
-    
+
 
     </div>
 
@@ -3520,7 +3858,7 @@ def editar_inscripcion(numero):
         </div>
 
     </div>
-   
+
     <div style="
         display:flex;
         gap:15px;
@@ -3615,7 +3953,7 @@ def editar_inscripcion(numero):
         # SELECT
         elif campo["tipo"] == "select":
 
-            
+
             salida += f"""
 
             <select name="campo_{campo['id']}">
@@ -3636,8 +3974,8 @@ def editar_inscripcion(numero):
                 """
 
             salida += "</select><br><br>"
-    
-    
+
+
     cursor.execute("""
     SELECT talle FROM stock_remeras
     WHERE evento_id = %s AND activo = 1
@@ -3662,7 +4000,7 @@ def editar_inscripcion(numero):
             continue
         selected = "selected" if talle_principal_actual == normalizar_talle(talle_opcion) else ""
         salida += f"<option value='{talle_opcion}' {selected}>{talle_opcion} (histórico)</option>"
-    
+
     salida += '</select><br><br>'
 
     # 👇 ACÁ ABRÍ DE NUEVO
@@ -3683,9 +4021,11 @@ def editar_inscripcion(numero):
     # PARTICIPANTES DE LA INSCRIPCIÓN
     # -------------------------
 
-    if len(participantes_inscripcion) > 1:
+    if participantes_adicionales_form:
 
-        salida += """
+        salida += f"""
+        <div id="participantes-adicionales"
+             data-hay-segundo="{1 if tiene_segundo_registrado else 0}">
         <hr>
 
         <h2>Participantes adicionales de la inscripción</h2>
@@ -3693,7 +4033,7 @@ def editar_inscripcion(numero):
 
         # Arrancamos desde el segundo participante.
         # El primero ya aparece arriba como "Datos del corredor".
-        for participante in participantes_inscripcion[1:]:
+        for participante in participantes_adicionales_form:
 
             fecha_nac_obj = participante.get("fecha_nac")
             edad = ""
@@ -3736,28 +4076,31 @@ def editar_inscripcion(numero):
 
                     <div>
                         Nombre<br>
-                        <input type="text"
+                <input type="text"
+                    {"data-segundo-campo='1'" if participante['orden'] == 2 else ''}
                             name="participante_nombre_{participante['orden']}"
                             value="{participante.get('nombre', '')}">
                     </div>
 
                     <div>
                         Apellido<br>
-                        <input type="text"
+                <input type="text"
+                    {"data-segundo-campo='1'" if participante['orden'] == 2 else ''}
                             name="participante_apellido_{participante['orden']}"
                             value="{participante.get('apellido', '')}">
                     </div>
 
                     <div>
                         DNI<br>
-                        <input type="text"
+                <input type="text"
+                    {"data-segundo-campo='1'" if participante['orden'] == 2 else ''}
                             name="participante_dni_{participante['orden']}"
                             value="{participante.get('dni', '')}">
                     </div>
 
                     <div>
                         Género<br>
-                        <select name="participante_genero_{participante['orden']}">
+                        <select {"data-segundo-campo='1'" if participante['orden'] == 2 else ''} name="participante_genero_{participante['orden']}">
 
                             <option value="">Seleccionar</option>
 
@@ -3777,6 +4120,7 @@ def editar_inscripcion(numero):
                     <div>
                         Fecha nacimiento<br>
                         <input type="date"
+                            {"data-segundo-campo='1'" if participante['orden'] == 2 else ''}
                             name="participante_fecha_nac_{participante['orden']}"
                             value="{fecha_nac}">
                     </div>
@@ -3792,7 +4136,9 @@ def editar_inscripcion(numero):
                 <div>
                     Talle remera<br>
 
-                    <select name="participante_talle_remera_{participante['orden']}">
+                    <select {"data-segundo-campo='1'" if participante['orden'] == 2 else ''}
+                            {"data-segundo-talle='1'" if participante['orden'] == 2 else ''}
+                            name="participante_talle_remera_{participante['orden']}">
 
                         <option value="">Seleccionar</option>
 
@@ -3805,8 +4151,41 @@ def editar_inscripcion(numero):
 
                 </div>
 
-            
+
             """
+
+        salida += "</div>"
+
+    else:
+        salida += '<div id="participantes-adicionales" data-hay-segundo="0" style="display:none"></div>'
+
+    salida += """
+    <script>
+    (function() {
+        const distancia = document.querySelector('select[name="distancia_id"]');
+        const bloque = document.getElementById("participantes-adicionales");
+        if (!distancia || !bloque) return;
+
+        function actualizarParticipanteDos() {
+            const opcion = distancia.options[distancia.selectedIndex];
+            const cantidad = parseInt(opcion?.dataset.participantes || "1", 10);
+            const incluyeRemera = opcion?.dataset.incluyeRemera === "1";
+            const requiereDos = cantidad >= 2;
+            const tieneFila = bloque.dataset.haySegundo === "1";
+
+            bloque.style.display = requiereDos || tieneFila ? "block" : "none";
+            bloque.querySelectorAll("[data-segundo-campo]").forEach(campo => {
+                const esTalle = campo.hasAttribute("data-segundo-talle");
+                campo.disabled = !requiereDos || (esTalle && !incluyeRemera);
+                campo.required = requiereDos && (!esTalle || incluyeRemera);
+            });
+        }
+
+        distancia.addEventListener("change", actualizarParticipanteDos);
+        actualizarParticipanteDos();
+    })();
+    </script>
+    """
 
     salida += """
         <div style="margin-top:20px; margin-bottom:20px;">
@@ -3828,8 +4207,8 @@ def editar_inscripcion(numero):
     salida += """
     </div>
     """
-               
-       
+
+
 
     # ------------------- PAGOS -------------------
     salida += f"""
@@ -3910,7 +4289,7 @@ def editar_inscripcion(numero):
                     <button type="button">Editar</button>
                 </a>
                 """
-            
+
             salida += f"""
             <tr>
                 <td>{p['id']}</td>
@@ -3930,7 +4309,7 @@ def editar_inscripcion(numero):
 
     <br><br>
 
-    
+
     </form>
     """
 
@@ -3975,8 +4354,8 @@ def editar_inscripcion(numero):
 
     </script>
     """
-    
-        
+
+
     salida += "<script>const teams = ["
 
     for t in teams:
@@ -3984,7 +4363,7 @@ def editar_inscripcion(numero):
 
     salida += "];</script>"
 
-    
+
 
     salida += """
     <script>
@@ -4035,10 +4414,11 @@ def editar_inscripcion(numero):
     </script>
     """
 
-    
+
+    cerrar_recursos_edicion()
     return layout(salida)
 
-    
+
 @organizador_bp.route("/test_pago")
 def test_pago():
     
